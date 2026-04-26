@@ -256,6 +256,20 @@ class LocalDatabase {
         }
     }
 
+    /// Updates classification fields on a picture row that was already saved.
+    /// Used when classification completes after the picture has been persisted —
+    /// we save the picture first so it is never lost if the user ends the hike
+    /// before the ML model finishes inference.
+    func updatePictureSpecies(localId: String, species: String?, speciesInfo: String?) throws {
+        try dbQueue.sync {
+            let pic = pendingPictures.filter(colLocalId == localId)
+            try db.run(pic.update(
+                colSpecies <- species,
+                colSpeciesInfo <- speciesInfo
+            ))
+        }
+    }
+
     func countUnsyncedPictures(forHikeLocalId id: String) throws -> Int {
         try dbQueue.sync {
             let query = pendingPictures.filter(colHikeLocalId == id && colSynced == false)

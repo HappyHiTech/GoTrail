@@ -20,6 +20,7 @@ final class ActiveHikeViewModel: ObservableObject {
     let hikeTitle: String
 
     private var pollTask: Task<Void, Never>?
+    private var pictureTasks: [UUID: Task<Void, Never>] = [:]
 
     init(hikeTitle: String) {
         self.hikeTitle = hikeTitle
@@ -60,6 +61,12 @@ final class ActiveHikeViewModel: ObservableObject {
 
     func stopHikeAndExit() async -> Bool {
         errorMessage = nil
+        // Wait for any in-flight classification tasks to finish so the
+        // pictures (with their species, if any) are fully persisted to local
+        // SQLite *before* we run sync. Otherwise, slow ML inference racing
+        // against `stopHike` could leave pictures in a half-saved state and
+        // they would never reach Supabase.
+        await waitForPendingPictureTasks()
         do {
             _ = try HikeSessionManager.shared.stopHike()
             await SyncManager.shared.syncPendingData()
@@ -73,6 +80,15 @@ final class ActiveHikeViewModel: ObservableObject {
         }
     }
 
+    private func waitForPendingPictureTasks() async {
+        let tasks = pictureTasks.values
+        guard tasks.isEmpty == false else { return }
+        for task in tasks {
+            _ = await task.value
+        }
+        pictureTasks.removeAll()
+    }
+
     func recenterMap() {
         recenterTick += 1
     }
@@ -82,8 +98,39 @@ final class ActiveHikeViewModel: ObservableObject {
     }
 
 #if canImport(UIKit)
+    /// Kicks off picture persistence + classification as a tracked Task.
+    /// `stopHikeAndExit` awaits these tasks before triggering sync so the
+    /// picture is durable in SQLite by the time we upload to Supabase.
+    func startCapturingPicture(_ image: UIImage) {
+        let taskId = UUID()
+        let task = Task { [weak self] in
+            _ = await self?.recordCapturedPicture(image)
+            await self?.removePictureTask(taskId)
+        }
+        pictureTasks[taskId] = task
+    }
+
+    private func removePictureTask(_ id: UUID) {
+        pictureTasks.removeValue(forKey: id)
+    }
+
+    /// Captures a picture during the active hike. We persist the picture to
+    /// the local DB *before* running classification. Classification is slow
+    /// (on-device ML), and if the user ends the hike while it's still in
+    /// flight the picture would otherwise be lost — `recordPicture` would
+    /// fail with `noActiveHike` and never reach SQLite. By saving up front
+    /// we guarantee the picture is queued for sync regardless of timing.
+    /// The species fields are filled in later via `updatePictureSpecies`.
     func recordCapturedPicture(_ image: UIImage) async -> Bool {
         errorMessage = nil
+
+        // 1. Snapshot the active hike id NOW. Even if `stopHike` runs while we
+        //    classify, we already know which hike this picture belongs to.
+        guard let hikeLocalId = HikeSessionManager.shared.currentHikeLocalId else {
+            errorMessage = "No active hike."
+            return false
+        }
+
         do {
             guard let imageData = image.jpegData(compressionQuality: 0.82) else {
                 errorMessage = "Failed to process captured image."
@@ -94,26 +141,42 @@ final class ActiveHikeViewModel: ObservableObject {
             let fileURL = documentsDirectory().appendingPathComponent(fileName)
             try imageData.write(to: fileURL, options: .atomic)
 
-            // Classify the plant if the model is ready
-            var species: String?
-            var speciesInfo: String?
-            classificationResult = nil
-            isClassifying = true
-            let result = await PlantClassifier.shared.classify(image: image)
-            species = result?.speciesName
-            speciesInfo = result?.speciesInfoJSON
-            classificationResult = result
-            isClassifying = false
-
             let location = LocationTracker.shared.lastLocation
-            try HikeSessionManager.shared.recordPicture(
+
+            // 2. Save to local DB immediately with no species yet. This is the
+            //    critical fix — the picture is durable from this point on.
+            let pictureLocalId = try HikeSessionManager.shared.recordPicture(
+                forHikeLocalId: hikeLocalId,
                 imagePath: fileURL.path,
-                species: species,
-                speciesInfo: speciesInfo,
+                species: nil,
+                speciesInfo: nil,
                 latitude: location?.coordinate.latitude,
                 longitude: location?.coordinate.longitude
             )
             refreshFromSession()
+
+            // 3. Classify (slow). Failures here just mean the picture stays
+            //    unidentified — it still uploads with no species.
+            classificationResult = nil
+            isClassifying = true
+            let result = await PlantClassifier.shared.classify(image: image)
+            classificationResult = result
+            isClassifying = false
+
+            // 4. Backfill species onto the already-persisted row.
+            if let result {
+                do {
+                    try LocalDatabase.shared.updatePictureSpecies(
+                        localId: pictureLocalId,
+                        species: result.speciesName,
+                        speciesInfo: result.speciesInfoJSON
+                    )
+                    refreshFromSession()
+                } catch {
+                    print("[ActiveHikeVM] Could not backfill species for \(pictureLocalId): \(error)")
+                }
+            }
+
             return true
         } catch {
             errorMessage = error.localizedDescription

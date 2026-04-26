@@ -98,6 +98,7 @@ class HikeSessionTests {
 
             // Record identified plant
             try HikeSessionManager.shared.recordPicture(
+                forHikeLocalId: hikeId,
                 imagePath: "/mock/plant1.jpg",
                 species: "Quercus agrifolia",
                 speciesInfo: "Coast Live Oak — native to California",
@@ -109,6 +110,7 @@ class HikeSessionTests {
 
             // Record unidentified plant
             try HikeSessionManager.shared.recordPicture(
+                forHikeLocalId: hikeId,
                 imagePath: "/mock/plant2.jpg",
                 species: nil,
                 speciesInfo: nil,
@@ -120,6 +122,7 @@ class HikeSessionTests {
 
             // Record another identified plant
             try HikeSessionManager.shared.recordPicture(
+                forHikeLocalId: hikeId,
                 imagePath: "/mock/plant3.jpg",
                 species: "Salvia apiana",
                 speciesInfo: "White Sage — used in traditional medicine",
@@ -204,6 +207,7 @@ class HikeSessionTests {
             )
 
             try HikeSessionManager.shared.recordPicture(
+                forHikeLocalId: hikeId,
                 imagePath: "/mock/plant.jpg",
                 species: "Artemisia californica",
                 speciesInfo: "California Sagebrush",
@@ -292,6 +296,7 @@ class HikeSessionTests {
             print("✓ Simulated 5 GPS points")
 
             try HikeSessionManager.shared.recordPicture(
+                forHikeLocalId: hikeId,
                 imagePath: "/mock/sage.jpg",
                 species: "Salvia mellifera",
                 speciesInfo: "Black Sage",

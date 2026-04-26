@@ -128,20 +128,25 @@ class HikeSessionManager {
 
     // MARK: - Record Picture
 
+    /// Saves a picture to the local DB for the given hike. Returns the new
+    /// picture's localId so callers can update classification fields on it
+    /// once the (slow) ML model finishes inference.
+    ///
+    /// The caller passes `forHikeLocalId` explicitly so that pictures captured
+    /// during an active hike are still persisted even if `stopHike` happens to
+    /// run before the caller finishes its async work (e.g. classification).
+    @discardableResult
     func recordPicture(
+        forHikeLocalId hikeLocalId: String,
         imagePath: String,
         species: String?,
         speciesInfo: String?,
         latitude: Double?,
         longitude: Double?
-    ) throws {
-        guard let hikeId = currentHikeLocalId else {
-            throw HikeError.noActiveHike
-        }
-
+    ) throws -> String {
         let pic = PendingPicture(
             localId: UUID().uuidString,
-            hikeLocalId: hikeId,
+            hikeLocalId: hikeLocalId,
             localImagePath: imagePath,
             species: species,
             speciesInfo: speciesInfo,
@@ -151,9 +156,15 @@ class HikeSessionManager {
         )
 
         try LocalDatabase.shared.savePicture(pic)
-        pictureCount += 1
 
-        print("[HikeSession] Picture recorded — species: \(species ?? "unidentified"), total: \(pictureCount)")
+        // Bump the live counter only when the picture belongs to the currently
+        // active hike — avoids double-counting after `stopHike` has reset state.
+        if hikeLocalId == currentHikeLocalId {
+            pictureCount += 1
+        }
+
+        print("[HikeSession] Picture recorded — species: \(species ?? "pending"), total this session: \(pictureCount)")
+        return pic.localId
     }
 
     // MARK: - Stop Hike

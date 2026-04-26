@@ -85,9 +85,7 @@ struct ActiveHikeView: View {
             guard isShowing == false, let image = pendingAnalysisUIImage else { return }
             pendingAnalysisUIImage = nil
             analysisItem = AnalysisItem(image: image)
-            Task {
-                _ = await viewModel.recordCapturedPicture(image)
-            }
+            viewModel.startCapturingPicture(image)
         }
         .fullScreenCover(item: $analysisItem) { item in
             PhotoAnalysisView(

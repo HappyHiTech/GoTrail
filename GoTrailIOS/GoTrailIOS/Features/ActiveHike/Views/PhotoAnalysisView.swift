@@ -4,10 +4,11 @@ import UIKit
 
 struct PhotoAnalysisView: View {
     let capturedImage: UIImage
+    let classificationResult: ClassificationResult?
+    let isClassifying: Bool
     let onBack: () -> Void
     let onConfirm: () -> Void
 
-    @StateObject private var viewModel: PhotoAnalysisViewModel
     @State private var didConfirm = false
 
     private let green = Color(red: 30 / 255, green: 86 / 255, blue: 49 / 255)
@@ -24,14 +25,10 @@ struct PhotoAnalysisView: View {
         onConfirm: @escaping () -> Void
     ) {
         self.capturedImage = capturedImage
+        self.classificationResult = classificationResult
+        self.isClassifying = isClassifying
         self.onBack = onBack
         self.onConfirm = onConfirm
-        _viewModel = StateObject(
-            wrappedValue: PhotoAnalysisViewModel(
-                classificationResult: classificationResult,
-                isClassifying: isClassifying
-            )
-        )
     }
 
     var body: some View {
@@ -49,7 +46,7 @@ struct PhotoAnalysisView: View {
                         topBar(topInset: topInset, horizontalPadding: horizontalPadding)
                         heroPhoto(height: heroHeight, horizontalPadding: horizontalPadding)
 
-                        if viewModel.isClassifying {
+                        if isClassifying {
                             classifyingCard(horizontalPadding: horizontalPadding)
                         } else {
                             speciesInfoCard(horizontalPadding: horizontalPadding)
@@ -116,7 +113,7 @@ struct PhotoAnalysisView: View {
                 .padding(12)
             }
             .overlay(alignment: .bottomTrailing) {
-                if let result = viewModel.classificationResult {
+                if let result = classificationResult {
                     confidenceBadge(result: result).padding(12)
                 }
             }
@@ -129,7 +126,7 @@ struct PhotoAnalysisView: View {
         return HStack(spacing: 4) {
             Image(systemName: "sparkle")
                 .font(.system(size: 10, weight: .semibold))
-            Text(viewModel.confidencePercent)
+            Text(confidencePercent)
                 .font(.custom("Montserrat-Bold", size: 10))
                 .tracking(0.5)
         }
@@ -153,15 +150,15 @@ struct PhotoAnalysisView: View {
                     }
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(viewModel.speciesName)
+                    Text(speciesName)
                         .font(.custom("Montserrat-Bold", size: 22))
                         .foregroundStyle(charcoal)
 
-                    Text(viewModel.confidenceLabel)
+                    Text(confidenceLabel)
                         .font(.system(size: 13))
                         .foregroundStyle(gray)
 
-                    if let speciesIdText = viewModel.speciesIdText {
+                    if let speciesIdText = speciesIdText {
                         Text(speciesIdText)
                             .font(.system(size: 11))
                             .foregroundStyle(gray.opacity(0.85))
@@ -173,10 +170,10 @@ struct PhotoAnalysisView: View {
                 .fill(Color(red: 232 / 255, green: 237 / 255, blue: 232 / 255))
                 .frame(height: 1)
 
-            if let result = viewModel.classificationResult {
+            if let result = classificationResult {
                 quickStatsStrip(result: result)
 
-                if viewModel.topPredictions.count > 1 {
+                if topPredictions.count > 1 {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("OTHER POSSIBILITIES")
                             .font(.custom("Montserrat-Bold", size: 10))
@@ -184,7 +181,7 @@ struct PhotoAnalysisView: View {
                             .foregroundStyle(gray)
 
                         FlexibleTagWrap(
-                            tags: viewModel.topPredictions.dropFirst().map {
+                            tags: topPredictions.dropFirst().map {
                                 "\($0.speciesName) (\(Int($0.confidence * 100))%)"
                             },
                             tint: green
@@ -273,7 +270,7 @@ struct PhotoAnalysisView: View {
                 .shadow(color: green.opacity(didConfirm ? 0.5 : 0.28), radius: 14, x: 0, y: 4)
             }
             .buttonStyle(.plain)
-            .disabled(didConfirm || viewModel.isClassifying)
+            .disabled(didConfirm || isClassifying)
             .padding(.horizontal, horizontalPadding)
             .padding(.top, 12)
             .padding(.bottom, max(14, bottomInset))
@@ -292,6 +289,27 @@ struct PhotoAnalysisView: View {
                 .clipShape(Circle())
         }
         .buttonStyle(.plain)
+    }
+
+    private var speciesName: String {
+        classificationResult?.speciesName ?? "Analyzing..."
+    }
+
+    private var confidenceLabel: String {
+        classificationResult?.confidenceLabel ?? "Running plant identification..."
+    }
+
+    private var confidencePercent: String {
+        classificationResult?.confidencePercent ?? "--"
+    }
+
+    private var speciesIdText: String? {
+        guard let speciesId = classificationResult?.speciesId else { return nil }
+        return "Species ID: \(speciesId)"
+    }
+
+    private var topPredictions: [ClassificationResult.Prediction] {
+        classificationResult?.topPredictions ?? []
     }
 }
 

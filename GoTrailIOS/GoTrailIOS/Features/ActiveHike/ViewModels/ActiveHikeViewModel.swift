@@ -14,6 +14,8 @@ final class ActiveHikeViewModel: ObservableObject {
     @Published private(set) var isActive: Bool = false
     @Published private(set) var errorMessage: String?
     @Published var recenterTick: Int = 0
+    @Published var classificationResult: ClassificationResult?
+    @Published var isClassifying: Bool = false
 
     let hikeTitle: String
 
@@ -57,6 +59,7 @@ final class ActiveHikeViewModel: ObservableObject {
     }
 
     func stopHikeAndExit() async -> Bool {
+        errorMessage = nil
         do {
             _ = try HikeSessionManager.shared.stopHike()
             Task.detached {
@@ -64,6 +67,9 @@ final class ActiveHikeViewModel: ObservableObject {
             }
             return true
         } catch {
+            if let hikeError = error as? HikeError, hikeError == .noActiveHike {
+                return true
+            }
             errorMessage = error.localizedDescription
             return false
         }
@@ -73,8 +79,13 @@ final class ActiveHikeViewModel: ObservableObject {
         recenterTick += 1
     }
 
+    func clearError() {
+        errorMessage = nil
+    }
+
 #if canImport(UIKit)
-    func recordCapturedPicture(_ image: UIImage) -> Bool {
+    func recordCapturedPicture(_ image: UIImage) async -> Bool {
+        errorMessage = nil
         do {
             guard let imageData = image.jpegData(compressionQuality: 0.82) else {
                 errorMessage = "Failed to process captured image."
@@ -85,11 +96,22 @@ final class ActiveHikeViewModel: ObservableObject {
             let fileURL = documentsDirectory().appendingPathComponent(fileName)
             try imageData.write(to: fileURL, options: .atomic)
 
+            // Classify the plant if the model is ready
+            var species: String?
+            var speciesInfo: String?
+            classificationResult = nil
+            isClassifying = true
+            let result = await PlantClassifier.shared.classify(image: image)
+            species = result?.speciesName
+            speciesInfo = result?.speciesInfoJSON
+            classificationResult = result
+            isClassifying = false
+
             let location = LocationTracker.shared.lastLocation
             try HikeSessionManager.shared.recordPicture(
                 imagePath: fileURL.path,
-                species: nil,
-                speciesInfo: nil,
+                species: species,
+                speciesInfo: speciesInfo,
                 latitude: location?.coordinate.latitude,
                 longitude: location?.coordinate.longitude
             )
@@ -108,7 +130,12 @@ final class ActiveHikeViewModel: ObservableObject {
         distanceMeters = HikeSessionManager.shared.distanceMeters
         routepoints = HikeSessionManager.shared.routepoints
         if let hikeLocalId = HikeSessionManager.shared.currentHikeLocalId {
-            pictures = (try? LocalDatabase.shared.getPictures(forHikeLocalId: hikeLocalId)) ?? []
+            do {
+                pictures = try LocalDatabase.shared.getPictures(forHikeLocalId: hikeLocalId)
+            } catch {
+                // Keep the previous in-memory pictures list if SQLite has a transient lock.
+                print("[ActiveHikeVM] Warning: failed to refresh pictures for hike \(hikeLocalId): \(error)")
+            }
         } else {
             pictures = []
         }

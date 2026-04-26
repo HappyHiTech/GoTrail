@@ -45,6 +45,9 @@ class LocalDatabase {
                 .documentDirectory, .userDomainMask, true
             ).first!
             db = try Connection("\(path)/trailguard.sqlite3")
+            db.busyTimeout = 5
+            try db.execute("PRAGMA journal_mode=WAL;")
+            try db.execute("PRAGMA synchronous=NORMAL;")
             try createTables()
             print("[LocalDatabase] Initialized at \(path)/trailguard.sqlite3")
         } catch {

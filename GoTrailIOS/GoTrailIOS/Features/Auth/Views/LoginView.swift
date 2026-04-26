@@ -70,6 +70,7 @@ struct LoginView: View {
                 .padding(.top, topPadding)
                 .padding(.bottom, bottomPadding)
             }
+            .ignoresSafeArea(.keyboard, edges: .bottom)
         }
     }
 
@@ -131,8 +132,10 @@ struct LoginView: View {
                 Group {
                     if viewModel.showPassword {
                         TextField("Enter your password", text: $viewModel.password)
+                            .foregroundStyle(.black)
                     } else {
                         SecureField("Enter your password", text: $viewModel.password)
+                            .foregroundStyle(.black)
                     }
                 }
 
@@ -216,6 +219,7 @@ struct LoginView: View {
 
             if isEmail {
                 TextField(prompt, text: text)
+                    .foregroundStyle(.black)
                     .padding(.horizontal, 16)
                     .frame(height: 52)
                     .background(Color(red: 245 / 255, green: 248 / 255, blue: 245 / 255))
@@ -226,6 +230,7 @@ struct LoginView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             } else {
                 TextField(prompt, text: text)
+                    .foregroundStyle(.black)
                     .padding(.horizontal, 16)
                     .frame(height: 52)
                     .background(Color(red: 245 / 255, green: 248 / 255, blue: 245 / 255))

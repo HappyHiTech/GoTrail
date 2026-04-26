@@ -3,6 +3,8 @@ import SwiftUI
 struct HikeHistoryView: View {
     @StateObject private var viewModel = HikeHistoryViewModel()
     @State private var selectedTab: DashboardTab = .history
+    @State private var showActiveHike = false
+    @State private var activeHikeTitle = "Current Hike"
 
     private let green = Color(red: 30 / 255, green: 86 / 255, blue: 49 / 255)
     private let pageBackground = Color(red: 245 / 255, green: 248 / 255, blue: 245 / 255)
@@ -23,11 +25,18 @@ struct HikeHistoryView: View {
                     pageBackground.ignoresSafeArea()
 
                     if selectedTab == .add {
-                        NewHikeView {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        NewHikeView(
+                            onClose: {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                    selectedTab = .history
+                                }
+                            },
+                            onStartHike: { hikeTitle in
+                                activeHikeTitle = hikeTitle.isEmpty ? "Current Hike" : hikeTitle
                                 selectedTab = .history
+                                showActiveHike = true
                             }
-                        }
+                        )
                         .transition(AnyTransition.opacity.combined(with: .scale(scale: 0.96)))
                     } else {
                         VStack(spacing: 0) {
@@ -53,6 +62,16 @@ struct HikeHistoryView: View {
             .navigationBarHidden(true)
             .navigationDestination(for: UUID.self) { hikeID in
                 HikeDetailView(hikeId: hikeID)
+            }
+            .fullScreenCover(isPresented: $showActiveHike, onDismiss: {
+                Task {
+                    await viewModel.loadHikes()
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    await viewModel.loadHikes()
+                }
+            }) {
+                ActiveHikeView(hikeTitle: activeHikeTitle)
+                    .interactiveDismissDisabled(true)
             }
         }
     }

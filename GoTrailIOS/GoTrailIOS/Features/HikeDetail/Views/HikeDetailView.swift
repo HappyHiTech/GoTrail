@@ -1,5 +1,9 @@
+import Foundation
 import SwiftUI
 import MapKit
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct HikeDetailView: View {
     @Environment(\.dismiss) private var dismiss
@@ -77,124 +81,184 @@ struct HikeDetailView: View {
             } else if let error = viewModel.errorMessage {
                 Text(error)
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color(red: 94 / 255, green: 94 / 255, blue: 94 / 255))
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.top, 20)
             } else {
-                statsGrid
+                hikeSummaryCard
                     .padding(.top, 14)
 
-                selectedPhotoCard
+                discoveredSpeciesSection
             }
         }
         .padding(.horizontal, horizontalPadding)
         .padding(.bottom, 24)
     }
 
-    private var statsGrid: some View {
-        let items: [(String, String, String)] = [
-            ("calendar", "Date", viewModel.dateText),
-            ("mappin.and.ellipse", "Location", viewModel.locationText),
-            ("figure.walk", "Distance", viewModel.distanceText),
-            ("clock", "Duration", viewModel.durationText),
-            ("leaf", "Plants Found", viewModel.plantsText)
-        ]
-
-        return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-            ForEach(items.indices, id: \.self) { index in
-                let item = items[index]
-                statCard(icon: item.0, title: item.1, value: item.2)
-            }
-        }
-    }
-
-    private func statCard(icon: String, title: String, value: String) -> some View {
-        HStack(spacing: 10) {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(green.opacity(0.09))
-                .frame(width: 32, height: 32)
-                .overlay {
-                    Image(systemName: icon)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(green)
-                }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                Text(value)
-                    .font(.custom("Montserrat-Bold", size: 12))
+    private var hikeSummaryCard: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Text("Hike Summary")
+                    .font(.custom("Montserrat-Bold", size: 15))
                     .foregroundStyle(Color(red: 26 / 255, green: 26 / 255, blue: 26 / 255))
-                    .lineLimit(1)
+
+                Spacer()
+
+                Text("Completed")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color(red: 74 / 255, green: 74 / 255, blue: 74 / 255))
+                    .padding(.horizontal, 12)
+                    .frame(height: 30)
+                    .background(Color.black.opacity(0.06))
+                    .clipShape(Capsule())
             }
 
-            Spacer(minLength: 0)
+            Divider()
+                .overlay(Color(red: 235 / 255, green: 235 / 255, blue: 235 / 255))
+
+            HStack(spacing: 0) {
+                summaryStatBlock(icon: "mappin", title: "Location", value: viewModel.locationText, subtitle: "Recorded location")
+                Rectangle().fill(Color(red: 235 / 255, green: 235 / 255, blue: 235 / 255)).frame(width: 1)
+                summaryStatBlock(icon: "calendar", title: "Date", value: viewModel.dateText, subtitle: "Hike date")
+            }
+            .frame(height: 78)
+
+            Divider()
+                .overlay(Color(red: 235 / 255, green: 235 / 255, blue: 235 / 255))
+
+            HStack(spacing: 0) {
+                summaryStatBlock(icon: "clock", title: "Duration", value: viewModel.durationText, subtitle: "Elapsed")
+                Rectangle().fill(Color(red: 235 / 255, green: 235 / 255, blue: 235 / 255)).frame(width: 1)
+                summaryStatBlock(icon: "paperclip", title: "Distance", value: viewModel.distanceText, subtitle: "Total trail")
+            }
+            .frame(height: 78)
         }
-        .padding(.horizontal, 11)
-        .frame(height: 58)
+        .padding(16)
         .background(.white)
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color(red: 232 / 255, green: 237 / 255, blue: 232 / 255), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.black.opacity(0.05), lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.07), radius: 5, x: 0, y: 2)
     }
 
-    private var selectedPhotoCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Selected Pin Preview")
-                .font(.custom("Montserrat-Bold", size: 12))
-                .tracking(0.4)
-                .foregroundStyle(Color(red: 26 / 255, green: 26 / 255, blue: 26 / 255))
+    private func summaryStatBlock(icon: String, title: String, value: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color(red: 112 / 255, green: 112 / 255, blue: 112 / 255))
+                Text(title.uppercased())
+                    .font(.system(size: 9, weight: .semibold))
+                    .tracking(0.5)
+                    .foregroundStyle(Color(red: 112 / 255, green: 112 / 255, blue: 112 / 255))
+            }
 
-            if let picture = viewModel.selectedPicture {
-                ZStack(alignment: .bottomLeading) {
-                    if let imageURL = viewModel.resolvedURL(for: picture) {
-                        AsyncImage(url: imageURL) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image
-                                    .resizable()
-                                    .scaledToFill()
-                            default:
-                                placeholderPhoto
-                            }
-                        }
-                    } else {
+            Text(value)
+                .font(.custom("Montserrat-Bold", size: 16))
+                .foregroundStyle(Color(red: 26 / 255, green: 26 / 255, blue: 26 / 255))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+
+            Text(subtitle)
+                .font(.system(size: 10))
+                .foregroundStyle(Color(red: 112 / 255, green: 112 / 255, blue: 112 / 255))
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 8)
+    }
+
+    private var discoveredSpeciesSection: some View {
+        let speciesPictures = viewModel.sortedPictures
+            .filter { ($0.species?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) }
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                HStack(spacing: 7) {
+                    Image(systemName: "leaf")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color(red: 26 / 255, green: 26 / 255, blue: 26 / 255))
+                    Text("Discovered Species")
+                        .font(.custom("Montserrat-Bold", size: 14))
+                        .foregroundStyle(Color(red: 26 / 255, green: 26 / 255, blue: 26 / 255))
+                }
+                Spacer()
+                Text("\(speciesPictures.count) found")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .frame(height: 22)
+                    .background(Color(red: 26 / 255, green: 26 / 255, blue: 26 / 255))
+                    .clipShape(Capsule())
+            }
+
+            if speciesPictures.isEmpty {
+                Text("No identified species found for this hike yet.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color(red: 94 / 255, green: 94 / 255, blue: 94 / 255))
+                    .padding(.vertical, 6)
+            } else {
+                let columns = [
+                    GridItem(.flexible(), spacing: 10),
+                    GridItem(.flexible(), spacing: 10)
+                ]
+
+                LazyVGrid(columns: columns, spacing: 10) {
+                    ForEach(speciesPictures) { picture in
+                        speciesCard(for: picture)
+                    }
+                }
+            }
+        }
+    }
+
+    private func speciesCard(for picture: Picture) -> some View {
+        ZStack(alignment: .bottomLeading) {
+            if let imageURL = viewModel.resolvedURL(for: picture) {
+                AsyncImage(url: imageURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    default:
                         placeholderPhoto
                     }
                 }
-                .frame(height: 190)
-                .frame(maxWidth: .infinity)
-                .overlay(alignment: .bottomLeading) {
-                    LinearGradient(
-                        colors: [.clear, .black.opacity(0.62)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .overlay(alignment: .bottomLeading) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(picture.species ?? "Unlabeled plant")
-                                .font(.custom("Montserrat-Bold", size: 14))
-                                .foregroundStyle(.white)
-                            Text("Tap other pins on the map to switch preview")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.85))
-                        }
-                        .padding(12)
-                    }
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             } else {
-                Text("No pinned photos for this hike.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 10)
+                placeholderPhoto
             }
         }
+        .frame(height: 174)
+        .frame(maxWidth: .infinity)
+        .overlay(alignment: .topTrailing) {
+            Text("Photo")
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8)
+                .frame(height: 28)
+                .background(Color.black.opacity(0.68))
+                .clipShape(Capsule())
+                .padding(6)
+        }
+        .overlay(alignment: .bottomLeading) {
+            LinearGradient(colors: [.clear, .black.opacity(0.6)], startPoint: .top, endPoint: .bottom)
+                .overlay(alignment: .bottomLeading) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(picture.species ?? "Unknown species")
+                            .font(.custom("Montserrat-Bold", size: 15))
+                            .foregroundStyle(.white)
+                        Text(picture.speciesInfo ?? "Trail observation")
+                            .font(.system(size: 10, weight: .medium))
+                            .italic()
+                            .foregroundStyle(.white.opacity(0.78))
+                            .lineLimit(1)
+                    }
+                    .padding(8)
+                }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 2)
     }
 
     private var placeholderPhoto: some View {

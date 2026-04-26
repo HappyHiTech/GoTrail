@@ -171,21 +171,21 @@ struct HikeDetailView: View {
     }
 
     private var discoveredSpeciesSection: some View {
-        let speciesPictures = viewModel.sortedPictures
-            .filter { ($0.species?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) }
+        let allPictures = viewModel.sortedPictures
+        let identifiedCount = allPictures.filter { $0.species?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false }.count
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 HStack(spacing: 7) {
-                    Image(systemName: "leaf")
+                    Image(systemName: "camera")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Color(red: 26 / 255, green: 26 / 255, blue: 26 / 255))
-                    Text("Discovered Species")
+                    Text("Photos & Species")
                         .font(.custom("Montserrat-Bold", size: 14))
                         .foregroundStyle(Color(red: 26 / 255, green: 26 / 255, blue: 26 / 255))
                 }
                 Spacer()
-                Text("\(speciesPictures.count) found")
+                Text("\(allPictures.count) photos · \(identifiedCount) identified")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 12)
@@ -194,8 +194,8 @@ struct HikeDetailView: View {
                     .clipShape(Capsule())
             }
 
-            if speciesPictures.isEmpty {
-                Text("No identified species found for this hike yet.")
+            if allPictures.isEmpty {
+                Text("No photos were taken during this hike.")
                     .font(.system(size: 12))
                     .foregroundStyle(Color(red: 94 / 255, green: 94 / 255, blue: 94 / 255))
                     .padding(.vertical, 6)
@@ -206,7 +206,7 @@ struct HikeDetailView: View {
                 ]
 
                 LazyVGrid(columns: columns, spacing: 10) {
-                    ForEach(speciesPictures) { picture in
+                    ForEach(allPictures) { picture in
                         speciesCard(for: picture)
                     }
                 }
@@ -215,7 +215,11 @@ struct HikeDetailView: View {
     }
 
     private func speciesCard(for picture: Picture) -> some View {
-        ZStack(alignment: .bottomLeading) {
+        let hasSpecies = picture.species?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let displayName = hasSpecies ? picture.species! : "Unidentified Plant"
+        let subtitle = Self.parseConfidenceLabel(from: picture.speciesInfo) ?? (hasSpecies ? "Identified species" : "Species not determined")
+
+        return ZStack(alignment: .bottomLeading) {
             if let imageURL = viewModel.resolvedURL(for: picture) {
                 AsyncImage(url: imageURL) { phase in
                     switch phase {
@@ -232,23 +236,27 @@ struct HikeDetailView: View {
         .frame(height: 174)
         .frame(maxWidth: .infinity)
         .overlay(alignment: .topTrailing) {
-            Text("Photo")
-                .font(.system(size: 8, weight: .semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 8)
-                .frame(height: 28)
-                .background(Color.black.opacity(0.68))
-                .clipShape(Capsule())
-                .padding(6)
+            HStack(spacing: 4) {
+                Image(systemName: hasSpecies ? "leaf" : "questionmark")
+                    .font(.system(size: 8, weight: .bold))
+                Text(hasSpecies ? "Identified" : "Photo")
+                    .font(.system(size: 8, weight: .semibold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8)
+            .frame(height: 28)
+            .background(hasSpecies ? green.opacity(0.85) : Color.black.opacity(0.68))
+            .clipShape(Capsule())
+            .padding(6)
         }
         .overlay(alignment: .bottomLeading) {
             LinearGradient(colors: [.clear, .black.opacity(0.6)], startPoint: .top, endPoint: .bottom)
                 .overlay(alignment: .bottomLeading) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(picture.species ?? "Unknown species")
+                        Text(displayName)
                             .font(.custom("Montserrat-Bold", size: 15))
                             .foregroundStyle(.white)
-                        Text(picture.speciesInfo ?? "Trail observation")
+                        Text(subtitle)
                             .font(.system(size: 10, weight: .medium))
                             .italic()
                             .foregroundStyle(.white.opacity(0.78))
@@ -259,6 +267,14 @@ struct HikeDetailView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 2)
+    }
+
+    private static func parseConfidenceLabel(from speciesInfoJSON: String?) -> String? {
+        guard let json = speciesInfoJSON,
+              let data = json.data(using: .utf8),
+              let result = try? JSONDecoder().decode(ClassificationResult.self, from: data)
+        else { return nil }
+        return result.confidenceLabel
     }
 
     private var placeholderPhoto: some View {

@@ -75,11 +75,15 @@ final class HikeDetailViewModel: ObservableObject {
         do {
             let fetched = try await queryService.getHikeDetail(hikeId: hikeId)
             hike = fetched
+            let picCount = fetched.pictures?.count ?? 0
+            let identified = fetched.pictures?.filter { $0.species != nil }.count ?? 0
+            print("[HikeDetailVM] Loaded hike \(fetched.title) — \(picCount) pictures (\(identified) with species), \(fetched.routepoints?.count ?? 0) routepoints")
             if selectedPictureID == nil {
                 selectedPictureID = fetched.pictures?.first?.id
             }
             await resolvePictureURLs()
         } catch {
+            print("[HikeDetailVM] Failed to load hike detail: \(error)")
             errorMessage = "Unable to load hike details right now."
         }
     }

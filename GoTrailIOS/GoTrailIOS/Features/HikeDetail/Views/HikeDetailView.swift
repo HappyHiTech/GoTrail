@@ -8,6 +8,7 @@ import UIKit
 struct HikeDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: HikeDetailViewModel
+    @State private var tappedPicture: Picture?
 
     private let green = Color(red: 30 / 255, green: 86 / 255, blue: 49 / 255)
     private let pageBackground = Color(red: 245 / 255, green: 248 / 255, blue: 245 / 255)
@@ -38,6 +39,15 @@ struct HikeDetailView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task {
             await viewModel.load()
+        }
+        .sheet(item: $tappedPicture) { picture in
+            PhotoDetailOverlay(
+                picture: picture,
+                imageSource: viewModel.imageSource(for: picture),
+                parsed: Self.parseClassificationResult(from: picture.speciesInfo),
+                green: green,
+                onDismiss: { tappedPicture = nil }
+            )
         }
     }
 
@@ -172,7 +182,9 @@ struct HikeDetailView: View {
 
     private var discoveredSpeciesSection: some View {
         let allPictures = viewModel.sortedPictures
-        let identifiedCount = allPictures.filter { $0.species?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false }.count
+        let identifiedCount = allPictures.filter {
+            $0.species?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        }.count
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -208,6 +220,10 @@ struct HikeDetailView: View {
                 LazyVGrid(columns: columns, spacing: 10) {
                     ForEach(allPictures) { picture in
                         speciesCard(for: picture)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                tappedPicture = picture
+                            }
                     }
                 }
             }
@@ -215,23 +231,17 @@ struct HikeDetailView: View {
     }
 
     private func speciesCard(for picture: Picture) -> some View {
-        let hasSpecies = picture.species?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        let displayName = hasSpecies ? picture.species! : "Unidentified Plant"
-        let subtitle = Self.parseConfidenceLabel(from: picture.speciesInfo) ?? (hasSpecies ? "Identified species" : "Species not determined")
+        let parsed = Self.parseClassificationResult(from: picture.speciesInfo)
+        let speciesFromField = picture.species?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasSpecies = (speciesFromField?.isEmpty == false) || parsed != nil
+        let displayName = speciesFromField.flatMap({ $0.isEmpty ? nil : $0 }) ?? parsed?.speciesName ?? "Unidentified Plant"
+        let subtitle = parsed?.confidenceLabel ?? (hasSpecies ? "Identified species" : "Species not determined")
 
         return ZStack(alignment: .bottomLeading) {
-            if let imageURL = viewModel.resolvedURL(for: picture) {
-                AsyncImage(url: imageURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFill()
-                    default:
-                        placeholderPhoto
-                    }
-                }
-            } else {
-                placeholderPhoto
-            }
+            PictureImageView(
+                source: viewModel.imageSource(for: picture),
+                placeholder: AnyView(placeholderPhoto)
+            )
         }
         .frame(height: 174)
         .frame(maxWidth: .infinity)
@@ -269,12 +279,11 @@ struct HikeDetailView: View {
         .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 2)
     }
 
-    private static func parseConfidenceLabel(from speciesInfoJSON: String?) -> String? {
+    static func parseClassificationResult(from speciesInfoJSON: String?) -> ClassificationResult? {
         guard let json = speciesInfoJSON,
-              let data = json.data(using: .utf8),
-              let result = try? JSONDecoder().decode(ClassificationResult.self, from: data)
+              let data = json.data(using: .utf8)
         else { return nil }
-        return result.confidenceLabel
+        return try? JSONDecoder().decode(ClassificationResult.self, from: data)
     }
 
     private var placeholderPhoto: some View {
@@ -575,6 +584,217 @@ private final class PictureAnnotationView: MKAnnotationView {
             iconImageView.centerXAnchor.constraint(equalTo: centerXAnchor),
             iconImageView.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
+    }
+}
+
+private struct PhotoDetailOverlay: View {
+    let picture: Picture
+    let imageSource: PictureImageSource?
+    let parsed: ClassificationResult?
+    let green: Color
+    let onDismiss: () -> Void
+
+    private let charcoal = Color(red: 26 / 255, green: 26 / 255, blue: 26 / 255)
+    private let gray = Color(red: 112 / 255, green: 112 / 255, blue: 112 / 255)
+
+    private var displayName: String {
+        if let s = picture.species?.trimmingCharacters(in: .whitespacesAndNewlines), s.isEmpty == false { return s }
+        return parsed?.speciesName ?? "Unidentified Plant"
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let topInset = geometry.safeAreaInsets.top
+            let bottomInset = geometry.safeAreaInsets.bottom
+            let horizontalPadding = max(16, geometry.size.width * 0.05)
+
+            ZStack(alignment: .top) {
+                Color(red: 245 / 255, green: 248 / 255, blue: 245 / 255).ignoresSafeArea()
+
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 12) {
+                        HStack {
+                            Button(action: onDismiss) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(charcoal)
+                                    .frame(width: 40, height: 40)
+                                    .background(Color.black.opacity(0.06))
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            Spacer()
+                            Text("Photo Detail")
+                                .font(.custom("Montserrat-Bold", size: 15))
+                                .foregroundStyle(charcoal)
+                            Spacer()
+                            Color.clear.frame(width: 40, height: 40)
+                        }
+                        .padding(.top, max(20, topInset + 16))
+                        .padding(.horizontal, horizontalPadding)
+
+                        photoHero(horizontalPadding: horizontalPadding)
+                        infoCard(horizontalPadding: horizontalPadding)
+                    }
+                    .padding(.bottom, max(24, bottomInset))
+                }
+            }
+        }
+    }
+
+    private func photoHero(horizontalPadding: CGFloat) -> some View {
+        Group {
+            switch imageSource {
+            case .localFile(let path):
+                if let uiImage = UIImage(contentsOfFile: path) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity)
+                } else {
+                    photoUnavailableHero
+                }
+            case .remote(let url):
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity)
+                    default:
+                        ProgressView()
+                            .tint(green)
+                            .frame(height: 260)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+            case .none:
+                photoUnavailableHero
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, horizontalPadding)
+    }
+
+    private var photoUnavailableHero: some View {
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .fill(Color(red: 240 / 255, green: 245 / 255, blue: 240 / 255))
+            .frame(height: 260)
+            .overlay {
+                VStack(spacing: 8) {
+                    Image(systemName: "photo")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(green.opacity(0.5))
+                    Text("Photo unavailable")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(green.opacity(0.6))
+                }
+            }
+    }
+
+    private func infoCard(horizontalPadding: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(green.opacity(0.1))
+                    .frame(width: 48, height: 48)
+                    .overlay {
+                        Image(systemName: "leaf")
+                            .font(.system(size: 21, weight: .semibold))
+                            .foregroundStyle(green)
+                    }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(displayName)
+                        .font(.custom("Montserrat-Bold", size: 22))
+                        .foregroundStyle(charcoal)
+
+                    if let parsed {
+                        Text(parsed.confidenceLabel)
+                            .font(.system(size: 13))
+                            .foregroundStyle(gray)
+
+                        Text("\(parsed.confidencePercent) confidence")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(parsed.confidence >= 0.7 ? green : .orange)
+                    } else {
+                        Text("Species not determined")
+                            .font(.system(size: 13))
+                            .foregroundStyle(gray)
+                    }
+                }
+            }
+
+            if let parsed, parsed.topPredictions.count > 1 {
+                Rectangle()
+                    .fill(Color(red: 232 / 255, green: 237 / 255, blue: 232 / 255))
+                    .frame(height: 1)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("OTHER POSSIBILITIES")
+                        .font(.custom("Montserrat-Bold", size: 10))
+                        .tracking(0.8)
+                        .foregroundStyle(gray)
+
+                    HStack(spacing: 6) {
+                        ForEach(parsed.topPredictions.dropFirst().prefix(3)) { pred in
+                            Text("\(pred.speciesName) (\(Int(pred.confidence * 100))%)")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(green)
+                                .padding(.horizontal, 10)
+                                .frame(height: 26)
+                                .background(green.opacity(0.08))
+                                .overlay(Capsule().stroke(green.opacity(0.18), lineWidth: 1))
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(.white)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(red: 232 / 255, green: 237 / 255, blue: 232 / 255), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.07), radius: 10, x: 0, y: 3)
+        .padding(.horizontal, horizontalPadding)
+    }
+}
+
+/// Renders a picture from either a local file path (instant, offline) or a
+/// signed remote URL (downloaded asynchronously). Falls back to the supplied
+/// placeholder when no source is available or the local file is missing.
+private struct PictureImageView: View {
+    let source: PictureImageSource?
+    let placeholder: AnyView
+
+    var body: some View {
+        Group {
+            switch source {
+            case .localFile(let path):
+                if let uiImage = UIImage(contentsOfFile: path) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    placeholder
+                }
+            case .remote(let url):
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    default:
+                        placeholder
+                    }
+                }
+            case .none:
+                placeholder
+            }
+        }
     }
 }
 

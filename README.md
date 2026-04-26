@@ -1,59 +1,72 @@
-# GoTrail Swift Starter Demos
+# GoTrail iOS
 
-This repo now has two beginner demos:
+GoTrail is a SwiftUI iOS hiking companion app for tracking hikes, logging trail photos, and identifying plants with on-device ML.
 
-- Terminal Swift script: `SwiftHelloDemo/main.swift`
-- SwiftUI iOS UI files: `TrailGuardiOSDemo/`
+## Features
 
-## 1) Terminal Demo (already runnable)
+- User authentication and account flow
+- Start and end hikes with live location tracking
+- Capture hike photos and classify plants from images
+- Hike history dashboard with trail summaries
+- Hike detail screens with route and photo context
+- Local persistence with background sync to Supabase
 
-From the project root:
+## Tech Stack
+
+- `SwiftUI` for UI and navigation
+- `MapKit` and Core Location for hike route/location features
+- Local SQLite-backed persistence for offline durability
+- `Supabase` for auth, database, and storage sync
+- `MLange` integration for plant classification
+
+## Project Structure
+
+- `GoTrailIOS/GoTrailIOS/App` - app entry, root navigation, core services
+- `GoTrailIOS/GoTrailIOS/Features` - feature modules (`Auth`, `NewHike`, `ActiveHike`, `HikeHistory`, `HikeDetail`, `HikeCard`, `Splash`)
+- `GoTrailIOS/GoTrailIOS/Hike` - hike session tracking and distance logic
+- `GoTrailIOS/GoTrailIOS/Local` - local database and pending sync models
+- `GoTrailIOS/GoTrailIOS/Sync` - Supabase sync orchestration
+- `GoTrailIOS/GoTrailIOS/Tests` - unit tests
+
+## Requirements
+
+- macOS with Xcode installed
+- Xcode supporting Swift 5+
+- iOS Simulator or physical iPhone
+- Supabase project credentials
+- MLange personal key
+
+## Configuration
+
+Runtime secrets are injected through xcconfig files and `Info.plist`:
+
+- `GoTrailIOS/Config/Debug.xcconfig`
+- `GoTrailIOS/Config/Release.xcconfig`
+- `GoTrailIOS/GoTrailIOS/Info.plist`
+
+Set the following values:
+
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `ZETIC_MLANGE_PERSONAL_KEY`
+
+Use placeholder values in source control for release builds, and keep real keys in local/private configuration.
+
+## Getting Started
+
+1. Clone the repository.
+2. Open `GoTrailIOS/GoTrailIOS.xcodeproj` in Xcode.
+3. Select a simulator (or connected device).
+4. Make sure `Debug.xcconfig` has valid local credentials.
+5. Build and run (`Cmd + R`).
+
+## Testing
+
+Run tests in Xcode from the `GoTrailIOS` test target, or run:
 
 ```bash
-swift "SwiftHelloDemo/main.swift"
+xcodebuild test \
+  -project "GoTrailIOS/GoTrailIOS.xcodeproj" \
+  -scheme "GoTrailIOS" \
+  -destination "platform=iOS Simulator,name=iPhone 16"
 ```
-
-Expected output:
-
-```text
-Hello, TrailGuard!
-Your first Swift program is running.
-```
-
-## 2) iOS SwiftUI Demo (Xcode Simulator)
-
-I created these SwiftUI files for you:
-
-- `TrailGuardiOSDemo/TrailGuardDemoApp.swift`
-- `TrailGuardiOSDemo/ContentView.swift`
-
-### Run in Xcode (step-by-step)
-
-1. Open `Xcode`.
-2. Create a new project:
-   - `File` -> `New` -> `Project...`
-   - Choose `iOS` -> `App`.
-3. Project options:
-   - Product Name: `TrailGuardDemo`
-   - Interface: `SwiftUI`
-   - Language: `Swift`
-   - Use Core Data: unchecked
-   - Testing System: default is fine
-4. Save the project anywhere (Desktop is fine).
-5. In Finder, open this repo folder and copy both files from `TrailGuardiOSDemo/`.
-6. In Xcode navigator, replace the auto-generated `ContentView.swift` and `YourAppNameApp.swift` contents with the copied files.
-   - If needed, rename `TrailGuardDemoApp` to match your project app file name.
-7. At the top of Xcode, choose a simulator (for example `iPhone 16`).
-8. Press the Run button (`▶`) or use `Cmd + R`.
-
-You should see:
-
-- "Hello, TrailGuard!"
-- A button labeled "Tap Me"
-- A tap counter that increases each press
-
-## What this teaches
-
-- `@State` in SwiftUI is like local React component state (`useState`).
-- `ContentView` is like a React functional component.
-- `TrailGuardDemoApp` is the app entry point (similar to your root render setup in web apps).

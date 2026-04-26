@@ -157,7 +157,6 @@ struct HikeHistoryView: View {
 
             HStack(spacing: 10) {
                 statCard(icon: "figure.walk", value: viewModel.totalDistanceText, label: "total distance")
-                statCard(icon: "leaf", value: viewModel.totalPlantsText, label: "plants found")
             }
             .padding(.top, 8)
         }

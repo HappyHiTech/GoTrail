@@ -86,7 +86,6 @@ struct HikeCardView: View {
             VStack(alignment: .leading, spacing: 4) {
                 cardRow(icon: "mappin.and.ellipse", text: hike.location)
                 cardRow(icon: "location", text: String(format: "%.1f km", hike.distanceKm))
-                cardRow(icon: "leaf", text: "\(hike.plantsFound) Plants")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 8)

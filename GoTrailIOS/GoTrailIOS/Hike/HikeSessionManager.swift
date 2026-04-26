@@ -15,24 +15,32 @@ class HikeSessionManager {
 
     private var timer: Timer?
     private var userId: String?
+    private var startedAt: Date?
+    private var lastAcceptedLocation: CLLocation?
 
     private init() {}
 
     // MARK: - Start Hike
 
-    func startHike(title: String, location: String?, userId: String) throws -> String {
+    func startHike(title: String, location: String?, userId: String, coverImageLocalPath: String? = nil) throws -> String {
         guard !isActive else {
             throw HikeError.alreadyActive
         }
+
+        // Defensive cleanup in case a stale timer exists.
+        timer?.invalidate()
+        timer = nil
 
         let localId = UUID().uuidString
         self.currentHikeLocalId = localId
         self.userId = userId
         self.isActive = true
         self.elapsedSeconds = 0
+        self.startedAt = Date()
         self.distanceMeters = 0
         self.pictureCount = 0
         self.routepoints = []
+        self.lastAcceptedLocation = nil
 
         // Save initial hike record to SQLite
         let hike = PendingHike(
@@ -42,31 +50,27 @@ class HikeSessionManager {
             location: location,
             date: ISO8601DateFormatter().string(from: Date()),
             distanceMeters: 0,
-            timeSeconds: 0
+            timeSeconds: 0,
+            coverImageLocalPath: coverImageLocalPath
         )
         try LocalDatabase.shared.saveHike(hike)
 
-        /// Start timer
-        let capturedLocalId = localId  // capture locally before async
-        DispatchQueue.main.async {
-            self.timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-                guard let self = self else { return }
-                self.elapsedSeconds += 1
+        // Start timer using wall-clock elapsed time instead of +1 increments.
+        let capturedLocalId = localId
+        self.timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            self.syncElapsedFromClock()
 
-                // Write to SQLite every 30 seconds
-                if self.elapsedSeconds % 30 == 0 {
-                    try? LocalDatabase.shared.updateHikeStats(
-                        localId: capturedLocalId,  // use captured value, not self.currentHikeLocalId
-                        distanceMeters: self.distanceMeters,
-                        timeSeconds: self.elapsedSeconds
-                    )
-                    print("[HikeSession] Auto-saved stats — \(self.elapsedSeconds)s, \(DistanceCalculator.formatDistance(self.distanceMeters))")
-                }
+            // Write to SQLite every 30 seconds
+            if self.elapsedSeconds > 0 && self.elapsedSeconds % 30 == 0 {
+                try? LocalDatabase.shared.updateHikeStats(
+                    localId: capturedLocalId,
+                    distanceMeters: self.distanceMeters,
+                    timeSeconds: self.elapsedSeconds
+                )
+                print("[HikeSession] Auto-saved stats — \(self.elapsedSeconds)s, \(DistanceCalculator.formatDistance(self.distanceMeters))")
             }
         }
-
-
-
 
         // Start GPS
         LocationTracker.shared.startTracking { [weak self] location in
@@ -81,6 +85,19 @@ class HikeSessionManager {
 
     private func handleLocationUpdate(_ location: CLLocation) {
         guard let hikeId = currentHikeLocalId else { return }
+        guard location.horizontalAccuracy >= 0, location.horizontalAccuracy <= 65 else { return }
+
+        if let lastAcceptedLocation {
+            let dt = location.timestamp.timeIntervalSince(lastAcceptedLocation.timestamp)
+            guard dt > 0 else { return }
+
+            let segmentMeters = location.distance(from: lastAcceptedLocation)
+            let impliedSpeed = segmentMeters / dt
+
+            // Filter GPS drift and impossible hiking jumps.
+            if segmentMeters < 2 { return }
+            if impliedSpeed > 8 { return }
+        }
 
         let point = PendingRoutepoint(
             localId: UUID().uuidString,
@@ -91,13 +108,14 @@ class HikeSessionManager {
             altitude: location.altitude
         )
 
-        // Incremental distance
+        // Incremental distance (after filtering noisy points).
         if let lastPoint = routepoints.last {
             let increment = DistanceCalculator.incrementalDistance(from: lastPoint, to: point)
             distanceMeters += increment
         }
 
         routepoints.append(point)
+        lastAcceptedLocation = location
 
         // Write to SQLite
         do {
@@ -149,6 +167,7 @@ class HikeSessionManager {
         // Stop timer and GPS
         timer?.invalidate()
         timer = nil
+        syncElapsedFromClock()
         LocationTracker.shared.stopTracking()
 
         // Final stats write (best effort). A transient DB write failure should not trap users in an active hike.
@@ -184,6 +203,8 @@ class HikeSessionManager {
         isActive = false
         currentHikeLocalId = nil
         userId = nil
+        startedAt = nil
+        lastAcceptedLocation = nil
         elapsedSeconds = 0
         distanceMeters = 0
         pictureCount = 0
@@ -208,6 +229,12 @@ class HikeSessionManager {
         } else {
             print("[HikeSession] No active hike")
         }
+    }
+
+    private func syncElapsedFromClock() {
+        guard let startedAt else { return }
+        let elapsed = Int(Date().timeIntervalSince(startedAt).rounded(.down))
+        elapsedSeconds = max(0, elapsed)
     }
 }
 

@@ -378,8 +378,11 @@ private struct RoutePreviewMap: UIViewRepresentable {
         mapView.addAnnotations(pinAnnotations)
 
         if let selectedPictureID {
-            if let selected = pinAnnotations.first(where: { $0.pictureID == selectedPictureID }) {
+            if let selected = pinAnnotations.first(where: { $0.pictureID == selectedPictureID }),
+               (mapView.selectedAnnotations.first as? PictureAnnotation)?.pictureID != selectedPictureID {
+                context.coordinator.suppressSelectionCallback = true
                 mapView.selectAnnotation(selected, animated: false)
+                context.coordinator.suppressSelectionCallback = false
             }
         }
 
@@ -449,6 +452,7 @@ private struct RoutePreviewMap: UIViewRepresentable {
         var green: UIColor = .systemGreen
         var selectedPictureID: UUID?
         var lastDatasetKey: String?
+        var suppressSelectionCallback = false
 
         init(onPinTap: @escaping (UUID) -> Void) {
             self.onPinTap = onPinTap
@@ -486,7 +490,13 @@ private struct RoutePreviewMap: UIViewRepresentable {
 
         func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
             guard let pictureAnnotation = view.annotation as? PictureAnnotation else { return }
-            onPinTap(pictureAnnotation.pictureID)
+            guard suppressSelectionCallback == false else { return }
+            guard pictureAnnotation.pictureID != selectedPictureID else { return }
+
+            // Defer state publication outside MKMapView's update callback cycle.
+            DispatchQueue.main.async { [onPinTap] in
+                onPinTap(pictureAnnotation.pictureID)
+            }
         }
     }
 }

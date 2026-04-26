@@ -15,14 +15,8 @@ struct TrailGuardApp: App {
             RootView()
                 .onAppear {
                     LocationTracker.shared.requestPermission()
+                    SyncManager.shared.startMonitoring()
                     Task { await PlantClassifier.shared.loadModel() }
-                    
-                    // Wait for permission dialog to appear and be answered
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                        Task {
-                            await HikeSessionTests.runAll()
-                        }
-                    }
                 }
         }
     }

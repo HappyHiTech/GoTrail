@@ -10,8 +10,13 @@ struct PendingHike {
     let date: String
     var distanceMeters: Double
     var timeSeconds: Int
+    var coverImageLocalPath: String?
+    /// Remote Supabase hike id, set after the first successful insert.
+    /// Used to make `syncHike` idempotent — on retries we reuse this id
+    /// instead of inserting another duplicate hike row.
+    var remoteHikeId: String?
 
-    init(localId: String, userId: String, title: String, location: String?, date: String, distanceMeters: Double, timeSeconds: Int) {
+    init(localId: String, userId: String, title: String, location: String?, date: String, distanceMeters: Double, timeSeconds: Int, coverImageLocalPath: String? = nil, remoteHikeId: String? = nil) {
         self.localId = localId
         self.userId = userId
         self.title = title
@@ -19,6 +24,8 @@ struct PendingHike {
         self.date = date
         self.distanceMeters = distanceMeters
         self.timeSeconds = timeSeconds
+        self.coverImageLocalPath = coverImageLocalPath
+        self.remoteHikeId = remoteHikeId
     }
 }
 

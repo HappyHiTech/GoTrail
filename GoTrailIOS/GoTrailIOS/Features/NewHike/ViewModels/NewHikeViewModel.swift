@@ -18,6 +18,7 @@ final class NewHikeViewModel: NSObject, ObservableObject, CLLocationManagerDeleg
     private let geocoder = CLGeocoder()
     private var hasStartedLocationLookup = false
     private var hasResolvedPlacemark = false
+    private var coverPhotoLocalPath: String?
 
     override init() {
         super.init()
@@ -40,6 +41,7 @@ final class NewHikeViewModel: NSObject, ObservableObject, CLLocationManagerDeleg
     func skipCoverPhoto() {
         hasCoverPhoto = false
         didSkipCoverPhoto = true
+        coverPhotoLocalPath = nil
     }
 
     func addCoverPhotoAfterSkip() {
@@ -51,7 +53,22 @@ final class NewHikeViewModel: NSObject, ObservableObject, CLLocationManagerDeleg
         hasCoverPhoto = hasPhoto
         if hasPhoto {
             didSkipCoverPhoto = false
+        } else {
+            coverPhotoLocalPath = nil
         }
+    }
+
+    func applyCoverPhotoSelection(imageData: Data) {
+        guard let savedPath = saveCoverPhotoDataToDocuments(imageData) else {
+            print("[NewHikeVM] ✗ Cover photo save failed — no path returned")
+            hasCoverPhoto = false
+            coverPhotoLocalPath = nil
+            return
+        }
+        hasCoverPhoto = true
+        didSkipCoverPhoto = false
+        coverPhotoLocalPath = savedPath
+        print("[NewHikeVM] ✓ Cover photo saved — path: \(savedPath), exists: \(FileManager.default.fileExists(atPath: savedPath))")
     }
 
     func beginLocationLookup() {
@@ -80,18 +97,18 @@ final class NewHikeViewModel: NSObject, ObservableObject, CLLocationManagerDeleg
 
         let title = hikeName.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
-            let userId = try await SupabaseManager.client.auth.session.user.id.uuidString
+            let userId = try await SupabaseManager.client.auth.session.user.id.uuidString.lowercased()
             let cleanLocation = sanitizedLocation()
+            if HikeSessionManager.shared.isActive {
+                _ = try HikeSessionManager.shared.stopHike()
+            }
+            print("[NewHikeVM] Starting hike with coverPhotoLocalPath: \(coverPhotoLocalPath ?? "nil")")
             _ = try HikeSessionManager.shared.startHike(
                 title: title,
                 location: cleanLocation,
-                userId: userId
+                userId: userId,
+                coverImageLocalPath: coverPhotoLocalPath
             )
-            errorMessage = nil
-            return true
-        } catch let hikeError as HikeError where hikeError == .alreadyActive {
-            // If a hike is still active (for example, the active view was dismissed),
-            // route the user back into the active hike experience instead of failing.
             errorMessage = nil
             return true
         } catch {
@@ -194,5 +211,18 @@ final class NewHikeViewModel: NSObject, ObservableObject, CLLocationManagerDeleg
             "Location unavailable"
         ])
         return placeholders.contains(trimmed) ? nil : trimmed
+    }
+
+    private func saveCoverPhotoDataToDocuments(_ data: Data) -> String? {
+        let fileName = "cover_\(UUID().uuidString).jpg"
+        let fileURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(fileName)
+        do {
+            try data.write(to: fileURL, options: .atomic)
+            return fileURL.path
+        } catch {
+            print("[NewHikeVM] Failed to save cover photo data: \(error)")
+            return nil
+        }
     }
 }

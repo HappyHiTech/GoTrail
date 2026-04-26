@@ -62,9 +62,7 @@ final class ActiveHikeViewModel: ObservableObject {
         errorMessage = nil
         do {
             _ = try HikeSessionManager.shared.stopHike()
-            Task.detached {
-                await SyncManager.shared.syncPendingData()
-            }
+            await SyncManager.shared.syncPendingData()
             return true
         } catch {
             if let hikeError = error as? HikeError, hikeError == .noActiveHike {

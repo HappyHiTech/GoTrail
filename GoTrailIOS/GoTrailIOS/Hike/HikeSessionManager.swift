@@ -151,12 +151,16 @@ class HikeSessionManager {
         timer = nil
         LocationTracker.shared.stopTracking()
 
-        // Final stats write
-        try LocalDatabase.shared.updateHikeStats(
-            localId: hikeId,
-            distanceMeters: distanceMeters,
-            timeSeconds: elapsedSeconds
-        )
+        // Final stats write (best effort). A transient DB write failure should not trap users in an active hike.
+        do {
+            try LocalDatabase.shared.updateHikeStats(
+                localId: hikeId,
+                distanceMeters: distanceMeters,
+                timeSeconds: elapsedSeconds
+            )
+        } catch {
+            print("[HikeSession] Warning: failed final stats write for \(hikeId): \(error)")
+        }
 
         let summary = PendingHike(
             localId: hikeId,
@@ -209,7 +213,7 @@ class HikeSessionManager {
 
 // MARK: - Errors
 
-enum HikeError: Error, LocalizedError {
+enum HikeError: Error, LocalizedError, Equatable {
     case alreadyActive
     case noActiveHike
 

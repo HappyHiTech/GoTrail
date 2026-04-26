@@ -120,6 +120,24 @@ struct ActiveHikeView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        .alert("Action Failed", isPresented: errorAlertBinding) {
+            Button("OK", role: .cancel) {
+                viewModel.clearError()
+            }
+        } message: {
+            Text(viewModel.errorMessage ?? "Unknown error")
+        }
+    }
+
+    private var errorAlertBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.errorMessage != nil },
+            set: { show in
+                if show == false {
+                    viewModel.clearError()
+                }
+            }
+        )
     }
 
     private func bottomActionPanel(

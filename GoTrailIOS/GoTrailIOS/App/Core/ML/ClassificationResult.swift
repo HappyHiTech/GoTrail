@@ -61,6 +61,9 @@ struct ClassificationResult: Codable, Identifiable {
     
     /// Human-readable confidence label for UI
     var confidenceLabel: String {
+        if speciesName == "Uncertain plant match" {
+            return "Low confidence — try a closer, clearer photo"
+        }
         switch confidence {
         case 0.7...:   return "High confidence"
         case 0.4..<0.7: return "Moderate confidence"

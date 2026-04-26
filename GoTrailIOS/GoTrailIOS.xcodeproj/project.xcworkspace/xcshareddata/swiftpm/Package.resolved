@@ -1,5 +1,5 @@
 {
-  "originHash" : "099ce8bcde7fd0493a667ef5503c25e8d17345d64a256e0a89f195dd055e3778",
+  "originHash" : "912451038fe3e15503df1f06536b643a289f5f3d39195f4ce352ca4432ef9533",
   "pins" : [
     {
       "identity" : "sqlite.swift",
@@ -71,6 +71,15 @@
       "state" : {
         "revision" : "dfd70507def84cb5fb821278448a262c6ff2bbad",
         "version" : "1.9.0"
+      }
+    },
+    {
+      "identity" : "zeticmlangeios",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/zetic-ai/ZeticMLangeiOS.git",
+      "state" : {
+        "revision" : "6070b1846a63abaa240a8a1dd409beea668cbefd",
+        "version" : "1.6.0"
       }
     }
   ],

@@ -78,15 +78,19 @@ struct ActiveHikeView: View {
         }
         .onChange(of: capturedUIImage) { _, image in
             guard let image else { return }
-            _ = viewModel.recordCapturedPicture(image)
             analysisUIImage = image
             showPhotoAnalysis = true
             capturedUIImage = nil
+            Task {
+                _ = await viewModel.recordCapturedPicture(image)
+            }
         }
         .fullScreenCover(isPresented: $showPhotoAnalysis) {
             if let analysisUIImage {
                 PhotoAnalysisView(
                     capturedImage: analysisUIImage,
+                    classificationResult: viewModel.classificationResult,
+                    isClassifying: viewModel.isClassifying,
                     onBack: {
                         showPhotoAnalysis = false
                     },
@@ -392,6 +396,8 @@ struct ActiveHikeView: View {
 #if canImport(UIKit)
 private struct PhotoAnalysisView: View {
     let capturedImage: UIImage
+    let classificationResult: ClassificationResult?
+    let isClassifying: Bool
     let onBack: () -> Void
     let onConfirm: () -> Void
 
@@ -403,12 +409,17 @@ private struct PhotoAnalysisView: View {
     private let red = Color(red: 211 / 255, green: 47 / 255, blue: 47 / 255)
     private let surface = Color(red: 245 / 255, green: 248 / 255, blue: 245 / 255)
 
-    private let mockSpecies = "Poison Oak"
-    private let mockScientificName = "Toxicodendron diversilobum"
-    private let mockFamily = "Anacardiaceae"
-    private let mockWarning = "Toxic plant detected. Avoid skin contact and wash exposed areas quickly."
-    private let mockDescription = "A temporary mock analysis result. Once model inference + upload is connected, this section will reflect real species detection details."
-    private let mockFeatures = ["Trifoliate", "Lobed edges", "Glossy surface", "Irritant"]
+    private var speciesName: String {
+        classificationResult?.speciesName ?? "Analyzing..."
+    }
+
+    private var confidenceText: String {
+        classificationResult?.confidencePercent ?? ""
+    }
+
+    private var confidenceLabel: String {
+        classificationResult?.confidenceLabel ?? ""
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -426,7 +437,11 @@ private struct PhotoAnalysisView: View {
 
                         heroPhoto(height: heroHeight, horizontalPadding: horizontalPadding)
 
-                        speciesInfoCard(horizontalPadding: horizontalPadding)
+                        if isClassifying {
+                            classifyingCard(horizontalPadding: horizontalPadding)
+                        } else {
+                            speciesInfoCard(horizontalPadding: horizontalPadding)
+                        }
                     }
                     .padding(.bottom, 120)
                 }
@@ -434,6 +449,23 @@ private struct PhotoAnalysisView: View {
                 bottomConfirmBar(bottomInset: bottomInset, horizontalPadding: horizontalPadding)
             }
         }
+    }
+
+    private func classifyingCard(horizontalPadding: CGFloat) -> some View {
+        VStack(spacing: 16) {
+            ProgressView()
+                .scaleEffect(1.2)
+                .tint(green)
+            Text("Identifying plant species...")
+                .font(.custom("Montserrat-Bold", size: 15))
+                .foregroundStyle(charcoal)
+        }
+        .padding(32)
+        .frame(maxWidth: .infinity)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.07), radius: 10, x: 0, y: 3)
+        .padding(.horizontal, horizontalPadding)
     }
 
     private func topBar(topInset: CGFloat, horizontalPadding: CGFloat) -> some View {
@@ -476,22 +508,31 @@ private struct PhotoAnalysisView: View {
                 .padding(12)
             }
             .overlay(alignment: .bottomTrailing) {
-                HStack(spacing: 4) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 10, weight: .semibold))
-                    Text("HIGH")
-                        .font(.custom("Montserrat-Bold", size: 10))
-                        .tracking(0.5)
+                if let result = classificationResult {
+                    confidenceBadge(result: result)
+                        .padding(12)
                 }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 10)
-                .frame(height: 28)
-                .background(red)
-                .clipShape(Capsule())
-                .padding(12)
             }
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .padding(.horizontal, horizontalPadding)
+    }
+
+    private func confidenceBadge(result: ClassificationResult) -> some View {
+        let badgeColor: Color = result.confidence >= 0.7 ? green :
+            result.confidence >= 0.4 ? Color.orange : gray
+
+        return HStack(spacing: 4) {
+            Image(systemName: "sparkle")
+                .font(.system(size: 10, weight: .semibold))
+            Text(result.confidencePercent)
+                .font(.custom("Montserrat-Bold", size: 10))
+                .tracking(0.5)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10)
+        .frame(height: 28)
+        .background(badgeColor)
+        .clipShape(Capsule())
     }
 
     private func speciesInfoCard(horizontalPadding: CGFloat) -> some View {
@@ -507,55 +548,50 @@ private struct PhotoAnalysisView: View {
                     }
 
                 VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 8) {
-                        Text(mockSpecies)
-                            .font(.custom("Montserrat-Bold", size: 22))
-                            .foregroundStyle(charcoal)
+                    Text(speciesName)
+                        .font(.custom("Montserrat-Bold", size: 22))
+                        .foregroundStyle(charcoal)
 
-                        Text("TOXIC")
-                            .font(.custom("Montserrat-Bold", size: 9))
-                            .tracking(0.6)
-                            .foregroundStyle(red)
-                            .padding(.horizontal, 8)
-                            .frame(height: 20)
-                            .background(red.opacity(0.1))
-                            .overlay(
-                                Capsule().stroke(red.opacity(0.3), lineWidth: 1)
-                            )
-                            .clipShape(Capsule())
+                    if let result = classificationResult {
+                        Text(result.confidenceLabel)
+                            .font(.system(size: 13))
+                            .foregroundStyle(gray)
+
+                        if let speciesId = result.speciesId {
+                            Text("Species ID: \(speciesId)")
+                                .font(.system(size: 11))
+                                .foregroundStyle(gray.opacity(0.85))
+                        }
                     }
-
-                    Text(mockScientificName)
-                        .font(.system(size: 13))
-                        .italic()
-                        .foregroundStyle(gray)
-
-                    Text("Family: \(mockFamily)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(gray.opacity(0.85))
                 }
             }
-
-            dangerCallout
 
             Rectangle()
                 .fill(Color(red: 232 / 255, green: 237 / 255, blue: 232 / 255))
                 .frame(height: 1)
 
-            Text(mockDescription)
-                .font(.system(size: 14))
-                .foregroundStyle(charcoal)
-                .lineSpacing(2)
+            if let result = classificationResult {
+                quickStatsStrip(result: result)
 
-            quickStatsStrip
+                if result.topPredictions.count > 1 {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("OTHER POSSIBILITIES")
+                            .font(.custom("Montserrat-Bold", size: 10))
+                            .tracking(0.8)
+                            .foregroundStyle(gray)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("DETECTED FEATURES")
-                    .font(.custom("Montserrat-Bold", size: 10))
-                    .tracking(0.8)
+                        FlexibleTagWrap(
+                            tags: result.topPredictions.dropFirst().map {
+                                "\($0.speciesName) (\(Int($0.confidence * 100))%)"
+                            },
+                            tint: green
+                        )
+                    }
+                }
+            } else {
+                Text("No classification result available.")
+                    .font(.system(size: 14))
                     .foregroundStyle(gray)
-
-                FlexibleTagWrap(tags: mockFeatures, tint: green)
             }
         }
         .padding(16)
@@ -569,51 +605,16 @@ private struct PhotoAnalysisView: View {
         .padding(.horizontal, horizontalPadding)
     }
 
-    private var dangerCallout: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 7) {
-                Circle()
-                    .fill(red)
-                    .frame(width: 22, height: 22)
-                    .overlay {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
+    private func quickStatsStrip(result: ClassificationResult) -> some View {
+        let confidenceColor: Color = result.confidence >= 0.7 ? green :
+            result.confidence >= 0.4 ? Color.orange : red
 
-                Text("DANGER · TOXIC · DO NOT TOUCH")
-                    .font(.custom("Montserrat-Bold", size: 11))
-                    .tracking(0.6)
-                    .foregroundStyle(red)
-            }
-
-            Text(mockWarning)
-                .font(.system(size: 12))
-                .foregroundStyle(Color(red: 139 / 255, green: 26 / 255, blue: 26 / 255))
-        }
-        .padding(.vertical, 11)
-        .padding(.horizontal, 12)
-        .background(red.opacity(0.05))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(red.opacity(0.2), lineWidth: 1)
-        )
-        .overlay(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(red)
-                .frame(width: 3)
-                .padding(.vertical, 8)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private var quickStatsStrip: some View {
-        HStack(spacing: 0) {
-            quickStatCell(title: "Toxicity", value: "High", valueColor: red)
+        return HStack(spacing: 0) {
+            quickStatCell(title: "Confidence", value: result.confidencePercent, valueColor: confidenceColor)
             divider
-            quickStatCell(title: "Habitat", value: "Woodland", valueColor: charcoal)
+            quickStatCell(title: "Top Match", value: "#1", valueColor: charcoal)
             divider
-            quickStatCell(title: "Season", value: "Spring-Fall", valueColor: charcoal)
+            quickStatCell(title: "Candidates", value: "\(result.topPredictions.count)", valueColor: charcoal)
         }
         .frame(height: 64)
         .background(surface)
@@ -671,7 +672,7 @@ private struct PhotoAnalysisView: View {
                 .shadow(color: green.opacity(didConfirm ? 0.5 : 0.28), radius: 14, x: 0, y: 4)
             }
             .buttonStyle(.plain)
-            .disabled(didConfirm)
+            .disabled(didConfirm || isClassifying)
             .padding(.horizontal, horizontalPadding)
             .padding(.top, 12)
             .padding(.bottom, max(14, bottomInset))

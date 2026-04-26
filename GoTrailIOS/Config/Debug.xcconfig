@@ -1,3 +1,4 @@
 SLASH = /
 SUPABASE_URL = https:$(SLASH)$(SLASH)sfukyrarhqofhprmjjgn.supabase.co
 SUPABASE_ANON_KEY = sb_publishable_faKOx0IX-rrs3A4H8a2taQ_az29SGm3
+ZETIC_MLANGE_PERSONAL_KEY = dev_984f8f1b97574ff18afa88468c7805e1

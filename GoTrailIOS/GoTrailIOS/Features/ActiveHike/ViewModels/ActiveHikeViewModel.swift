@@ -14,6 +14,8 @@ final class ActiveHikeViewModel: ObservableObject {
     @Published private(set) var isActive: Bool = false
     @Published private(set) var errorMessage: String?
     @Published var recenterTick: Int = 0
+    @Published var classificationResult: ClassificationResult?
+    @Published var isClassifying: Bool = false
 
     let hikeTitle: String
 
@@ -74,7 +76,7 @@ final class ActiveHikeViewModel: ObservableObject {
     }
 
 #if canImport(UIKit)
-    func recordCapturedPicture(_ image: UIImage) -> Bool {
+    func recordCapturedPicture(_ image: UIImage) async -> Bool {
         do {
             guard let imageData = image.jpegData(compressionQuality: 0.82) else {
                 errorMessage = "Failed to process captured image."
@@ -85,11 +87,24 @@ final class ActiveHikeViewModel: ObservableObject {
             let fileURL = documentsDirectory().appendingPathComponent(fileName)
             try imageData.write(to: fileURL, options: .atomic)
 
+            // Classify the plant if the model is ready
+            var species: String?
+            var speciesInfo: String?
+            classificationResult = nil
+            isClassifying = true
+            if let cgImage = image.cgImage {
+                let result = await PlantClassifier.shared.classify(image: cgImage)
+                species = result?.speciesName
+                speciesInfo = result?.speciesInfoJSON
+                classificationResult = result
+            }
+            isClassifying = false
+
             let location = LocationTracker.shared.lastLocation
             try HikeSessionManager.shared.recordPicture(
                 imagePath: fileURL.path,
-                species: nil,
-                speciesInfo: nil,
+                species: species,
+                speciesInfo: speciesInfo,
                 latitude: location?.coordinate.latitude,
                 longitude: location?.coordinate.longitude
             )

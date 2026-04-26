@@ -65,9 +65,7 @@ struct HikeHistoryView: View {
             }
             .fullScreenCover(isPresented: $showActiveHike, onDismiss: {
                 Task {
-                    await viewModel.loadHikes()
-                    try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    await viewModel.loadHikes()
+                    await viewModel.refresh()
                 }
             }) {
                 ActiveHikeView(hikeTitle: activeHikeTitle)
@@ -173,37 +171,57 @@ struct HikeHistoryView: View {
         VStack(spacing: 0) {
             summaryHeader(horizontalPadding: horizontalPadding)
 
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 14) {
-                    if viewModel.isLoading {
-                        ProgressView()
-                            .tint(green)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 50)
-                    } else if viewModel.hikes.isEmpty {
-                        emptyStateCard
-                    } else {
-                        LazyVGrid(columns: gridColumns, spacing: 10) {
-                            ForEach(viewModel.hikes) { hike in
-                                NavigationLink(value: hike.id) {
-                                    HikeCardView(hike: hike)
+            ZStack {
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 14) {
+                        if viewModel.hikes.isEmpty {
+                            if viewModel.isLoading == false {
+                                emptyStateCard
+                            }
+                        } else {
+                            LazyVGrid(columns: gridColumns, spacing: 10) {
+                                ForEach(viewModel.hikes) { hike in
+                                    NavigationLink(value: hike.id) {
+                                        HikeCardView(hike: hike)
+                                    }
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
                     }
+                    .padding(.horizontal, horizontalPadding)
+                    .padding(.top, 14)
+                    .padding(.bottom, 54 + max(0, bottomInset - 8))
                 }
-                .padding(.horizontal, horizontalPadding)
-                .padding(.top, 14)
-                .padding(.bottom, 54 + max(0, bottomInset - 8))
-            }
-            .refreshable {
-                await viewModel.loadHikes()
+                .refreshable {
+                    await viewModel.refresh()
+                }
+
+                if viewModel.isLoading {
+                    historyLoadingOverlay
+                }
             }
         }
         .task {
-            await viewModel.loadHikes()
+            await viewModel.refresh()
         }
+    }
+
+    private var historyLoadingOverlay: some View {
+        VStack(spacing: 10) {
+            ProgressView()
+                .scaleEffect(1.12)
+                .tint(green)
+
+            Text(viewModel.isWaitingForNetwork ? "Waiting for internet..." : "Syncing hike data...")
+                .font(.custom("Montserrat-Bold", size: 15))
+                .foregroundStyle(Color(red: 26 / 255, green: 26 / 255, blue: 26 / 255))
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(0.12), radius: 10, x: 0, y: 3)
     }
 
     private func statCard(icon: String, value: String, label: String) -> some View {

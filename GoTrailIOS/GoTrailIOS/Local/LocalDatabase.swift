@@ -6,6 +6,7 @@ class LocalDatabase {
     static let shared = LocalDatabase()
 
     private var db: Connection!
+    private let dbQueue = DispatchQueue(label: "com.gotrail.localdatabase.queue")
 
     // Table definitions
     private let pendingHikes = Table("pending_hikes")
@@ -24,6 +25,8 @@ class LocalDatabase {
     private let colDate = Expression<String>("date")
     private let colDistanceMeters = Expression<Double>("distance_meters")
     private let colTimeSeconds = Expression<Int>("time_seconds")
+    private let colCoverImageLocalPath = Expression<String?>("cover_image_local_path")
+    private let colRemoteHikeId = Expression<String?>("remote_hike_id")
 
     // Picture columns
     private let colLocalImagePath = Expression<String>("local_image_path")
@@ -89,169 +92,232 @@ class LocalDatabase {
             t.column(colSynced, defaultValue: false)
         })
 
+        // Migrations: add columns added after the initial schema.
+        let hikeColumns = try db.prepare("PRAGMA table_info(pending_hikes)").map { row in
+            row[1] as? String ?? ""
+        }
+        if !hikeColumns.contains("cover_image_local_path") {
+            try db.execute("ALTER TABLE pending_hikes ADD COLUMN cover_image_local_path TEXT")
+        }
+        if !hikeColumns.contains("remote_hike_id") {
+            try db.execute("ALTER TABLE pending_hikes ADD COLUMN remote_hike_id TEXT")
+        }
+
         print("[LocalDatabase] Tables created successfully")
     }
 
     // MARK: - Hikes
 
     func saveHike(_ hike: PendingHike) throws {
-        try db.run(pendingHikes.insert(
-            colLocalId <- hike.localId,
-            colUserId <- hike.userId,
-            colTitle <- hike.title,
-            colLocation <- hike.location,
-            colDate <- hike.date,
-            colDistanceMeters <- hike.distanceMeters,
-            colTimeSeconds <- hike.timeSeconds,
-            colSynced <- false
-        ))
-        print("[LocalDatabase] Saved hike: \(hike.localId)")
+        try dbQueue.sync {
+            try db.run(pendingHikes.insert(
+                colLocalId <- hike.localId,
+                colUserId <- hike.userId,
+                colTitle <- hike.title,
+                colLocation <- hike.location,
+                colDate <- hike.date,
+                colDistanceMeters <- hike.distanceMeters,
+                colTimeSeconds <- hike.timeSeconds,
+                colCoverImageLocalPath <- hike.coverImageLocalPath,
+                colSynced <- false
+            ))
+            print("[LocalDatabase] Saved hike: \(hike.localId)")
+        }
     }
 
     func updateHikeStats(localId: String, distanceMeters: Double, timeSeconds: Int) throws {
-        let hike = pendingHikes.filter(colLocalId == localId)
-        try db.run(hike.update(
-            colDistanceMeters <- distanceMeters,
-            colTimeSeconds <- timeSeconds
-        ))
-        print("[LocalDatabase] Updated hike stats: \(localId) — \(distanceMeters)m, \(timeSeconds)s")
+        try dbQueue.sync {
+            let hike = pendingHikes.filter(colLocalId == localId)
+            try db.run(hike.update(
+                colDistanceMeters <- distanceMeters,
+                colTimeSeconds <- timeSeconds
+            ))
+            print("[LocalDatabase] Updated hike stats: \(localId) — \(distanceMeters)m, \(timeSeconds)s")
+        }
     }
 
     func getUnsyncedHikes(forUserId userId: String) throws -> [PendingHike] {
-        let query = pendingHikes.filter(colUserId == userId && colSynced == false)
-        return try db.prepare(query).map { row in
-            PendingHike(
-                localId: row[colLocalId],
-                userId: row[colUserId],
-                title: row[colTitle],
-                location: row[colLocation],
-                date: row[colDate],
-                distanceMeters: row[colDistanceMeters],
-                timeSeconds: row[colTimeSeconds]
-            )
+        try dbQueue.sync {
+            // Legacy rows can have user_id casing mismatches; filter in Swift using case-insensitive compare.
+            let query = pendingHikes.filter(colSynced == false)
+            let rows = try db.prepare(query).map { row in
+                PendingHike(
+                    localId: row[colLocalId],
+                    userId: row[colUserId],
+                    title: row[colTitle],
+                    location: row[colLocation],
+                    date: row[colDate],
+                    distanceMeters: row[colDistanceMeters],
+                    timeSeconds: row[colTimeSeconds],
+                    coverImageLocalPath: row[colCoverImageLocalPath],
+                    remoteHikeId: row[colRemoteHikeId]
+                )
+            }
+            return rows.filter { $0.userId.caseInsensitiveCompare(userId) == .orderedSame }
         }
     }
 
     func getAllHikes() throws -> [PendingHike] {
-        return try db.prepare(pendingHikes).map { row in
-            PendingHike(
-                localId: row[colLocalId],
-                userId: row[colUserId],
-                title: row[colTitle],
-                location: row[colLocation],
-                date: row[colDate],
-                distanceMeters: row[colDistanceMeters],
-                timeSeconds: row[colTimeSeconds]
-            )
+        try dbQueue.sync {
+            return try db.prepare(pendingHikes).map { row in
+                PendingHike(
+                    localId: row[colLocalId],
+                    userId: row[colUserId],
+                    title: row[colTitle],
+                    location: row[colLocation],
+                    date: row[colDate],
+                    distanceMeters: row[colDistanceMeters],
+                    timeSeconds: row[colTimeSeconds],
+                    coverImageLocalPath: row[colCoverImageLocalPath],
+                    remoteHikeId: row[colRemoteHikeId]
+                )
+            }
         }
     }
 
     func markHikeSynced(_ localId: String) throws {
-        let hike = pendingHikes.filter(colLocalId == localId)
-        try db.run(hike.update(colSynced <- true))
+        try dbQueue.sync {
+            let hike = pendingHikes.filter(colLocalId == localId)
+            try db.run(hike.update(colSynced <- true))
+        }
+    }
+
+    /// Persists the Supabase-side hike id after a successful insert so that
+    /// later sync attempts can resume picture/routepoint uploads without
+    /// creating a duplicate hike row.
+    func setRemoteHikeId(localId: String, remoteHikeId: String) throws {
+        try dbQueue.sync {
+            let hike = pendingHikes.filter(colLocalId == localId)
+            try db.run(hike.update(colRemoteHikeId <- remoteHikeId))
+        }
     }
 
     // MARK: - Pictures
 
     func savePicture(_ pic: PendingPicture) throws {
-        try db.run(pendingPictures.insert(
-            colLocalId <- pic.localId,
-            colHikeLocalId <- pic.hikeLocalId,
-            colLocalImagePath <- pic.localImagePath,
-            colSpecies <- pic.species,
-            colSpeciesInfo <- pic.speciesInfo,
-            colLatitude <- pic.latitude,
-            colLongitude <- pic.longitude,
-            colTakenAt <- pic.takenAt,
-            colSynced <- false
-        ))
-        print("[LocalDatabase] Saved picture: \(pic.localId)")
+        try dbQueue.sync {
+            try db.run(pendingPictures.insert(
+                colLocalId <- pic.localId,
+                colHikeLocalId <- pic.hikeLocalId,
+                colLocalImagePath <- pic.localImagePath,
+                colSpecies <- pic.species,
+                colSpeciesInfo <- pic.speciesInfo,
+                colLatitude <- pic.latitude,
+                colLongitude <- pic.longitude,
+                colTakenAt <- pic.takenAt,
+                colSynced <- false
+            ))
+            print("[LocalDatabase] Saved picture: \(pic.localId)")
+        }
     }
 
     func getUnsyncedPictures(forHikeLocalId id: String) throws -> [PendingPicture] {
-        let query = pendingPictures.filter(colHikeLocalId == id && colSynced == false)
-        return try db.prepare(query).map { row in
-            PendingPicture(
-                localId: row[colLocalId],
-                hikeLocalId: row[colHikeLocalId],
-                localImagePath: row[colLocalImagePath],
-                species: row[colSpecies],
-                speciesInfo: row[colSpeciesInfo],
-                latitude: row[colLatitude],
-                longitude: row[colLongitude],
-                takenAt: row[colTakenAt]
-            )
+        try dbQueue.sync {
+            let query = pendingPictures.filter(colHikeLocalId == id && colSynced == false)
+            return try db.prepare(query).map { row in
+                PendingPicture(
+                    localId: row[colLocalId],
+                    hikeLocalId: row[colHikeLocalId],
+                    localImagePath: row[colLocalImagePath],
+                    species: row[colSpecies],
+                    speciesInfo: row[colSpeciesInfo],
+                    latitude: row[colLatitude],
+                    longitude: row[colLongitude],
+                    takenAt: row[colTakenAt]
+                )
+            }
         }
     }
 
     func getPictures(forHikeLocalId id: String) throws -> [PendingPicture] {
-        let query = pendingPictures.filter(colHikeLocalId == id)
-        return try db.prepare(query).map { row in
-            PendingPicture(
-                localId: row[colLocalId],
-                hikeLocalId: row[colHikeLocalId],
-                localImagePath: row[colLocalImagePath],
-                species: row[colSpecies],
-                speciesInfo: row[colSpeciesInfo],
-                latitude: row[colLatitude],
-                longitude: row[colLongitude],
-                takenAt: row[colTakenAt]
-            )
+        try dbQueue.sync {
+            let query = pendingPictures
+                .filter(colHikeLocalId == id)
+                .order(colTakenAt.asc)
+            return try db.prepare(query).map { row in
+                PendingPicture(
+                    localId: row[colLocalId],
+                    hikeLocalId: row[colHikeLocalId],
+                    localImagePath: row[colLocalImagePath],
+                    species: row[colSpecies],
+                    speciesInfo: row[colSpeciesInfo],
+                    latitude: row[colLatitude],
+                    longitude: row[colLongitude],
+                    takenAt: row[colTakenAt]
+                )
+            }
         }
     }
 
     func markPictureSynced(_ localId: String) throws {
-        let pic = pendingPictures.filter(colLocalId == localId)
-        try db.run(pic.update(colSynced <- true))
+        try dbQueue.sync {
+            let pic = pendingPictures.filter(colLocalId == localId)
+            try db.run(pic.update(colSynced <- true))
+        }
+    }
+
+    func countUnsyncedPictures(forHikeLocalId id: String) throws -> Int {
+        try dbQueue.sync {
+            let query = pendingPictures.filter(colHikeLocalId == id && colSynced == false)
+            return try db.scalar(query.count)
+        }
     }
 
     // MARK: - Routepoints
 
     func saveRoutepoint(_ point: PendingRoutepoint) throws {
-        try db.run(pendingRoutepoints.insert(
-            colLocalId <- point.localId,
-            colHikeLocalId <- point.hikeLocalId,
-            colRpLatitude <- point.latitude,
-            colRpLongitude <- point.longitude,
-            colRpTimestamp <- point.timestamp,
-            colAltitude <- point.altitude,
-            colSynced <- false
-        ))
+        try dbQueue.sync {
+            try db.run(pendingRoutepoints.insert(
+                colLocalId <- point.localId,
+                colHikeLocalId <- point.hikeLocalId,
+                colRpLatitude <- point.latitude,
+                colRpLongitude <- point.longitude,
+                colRpTimestamp <- point.timestamp,
+                colAltitude <- point.altitude,
+                colSynced <- false
+            ))
+        }
     }
 
     func getRoutepoints(forHikeLocalId id: String) throws -> [PendingRoutepoint] {
-        let query = pendingRoutepoints
-            .filter(colHikeLocalId == id)
-            .order(colRpTimestamp.asc)
-        return try db.prepare(query).map { row in
-            PendingRoutepoint(
-                localId: row[colLocalId],
-                hikeLocalId: row[colHikeLocalId],
-                latitude: row[colRpLatitude],
-                longitude: row[colRpLongitude],
-                timestamp: row[colRpTimestamp],
-                altitude: row[colAltitude]
-            )
+        try dbQueue.sync {
+            let query = pendingRoutepoints
+                .filter(colHikeLocalId == id)
+                .order(colRpTimestamp.asc)
+            return try db.prepare(query).map { row in
+                PendingRoutepoint(
+                    localId: row[colLocalId],
+                    hikeLocalId: row[colHikeLocalId],
+                    latitude: row[colRpLatitude],
+                    longitude: row[colRpLongitude],
+                    timestamp: row[colRpTimestamp],
+                    altitude: row[colAltitude]
+                )
+            }
         }
     }
 
     func getUnsyncedRoutepoints(forHikeLocalId id: String) throws -> [PendingRoutepoint] {
-        let query = pendingRoutepoints.filter(colHikeLocalId == id && colSynced == false)
-        return try db.prepare(query).map { row in
-            PendingRoutepoint(
-                localId: row[colLocalId],
-                hikeLocalId: row[colHikeLocalId],
-                latitude: row[colRpLatitude],
-                longitude: row[colRpLongitude],
-                timestamp: row[colRpTimestamp],
-                altitude: row[colAltitude]
-            )
+        try dbQueue.sync {
+            let query = pendingRoutepoints.filter(colHikeLocalId == id && colSynced == false)
+            return try db.prepare(query).map { row in
+                PendingRoutepoint(
+                    localId: row[colLocalId],
+                    hikeLocalId: row[colHikeLocalId],
+                    latitude: row[colRpLatitude],
+                    longitude: row[colRpLongitude],
+                    timestamp: row[colRpTimestamp],
+                    altitude: row[colAltitude]
+                )
+            }
         }
     }
 
     func markRoutepointsSynced(forHikeLocalId id: String) throws {
-        let points = pendingRoutepoints.filter(colHikeLocalId == id)
-        try db.run(points.update(colSynced <- true))
+        try dbQueue.sync {
+            let points = pendingRoutepoints.filter(colHikeLocalId == id)
+            try db.run(points.update(colSynced <- true))
+        }
     }
 }
 

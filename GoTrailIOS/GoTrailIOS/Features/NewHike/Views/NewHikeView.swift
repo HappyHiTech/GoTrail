@@ -230,7 +230,14 @@ struct NewHikeView: View {
                 Image(systemName: "paperplane")
                     .font(.system(size: 15))
                     .foregroundStyle(Color(red: 180 / 255, green: 180 / 255, blue: 180 / 255))
-                TextField("Name your hike... (e.g., Sunset Ridge)", text: $viewModel.hikeName)
+                TextField(
+                    "",
+                    text: $viewModel.hikeName,
+                    prompt: Text("Name your hike... (e.g., Sunset Ridge)")
+                        .font(.custom("Montserrat-Bold", size: 14))
+                        .foregroundStyle(Color(red: 130 / 255, green: 130 / 255, blue: 130 / 255))
+                )
+                    .font(.custom("Montserrat-Bold", size: 14))
                     .foregroundStyle(.black)
                     .focused($isHikeNameFocused)
             }
@@ -402,12 +409,14 @@ struct NewHikeView: View {
 
     private func loadCoverPhoto(from item: PhotosPickerItem) async {
         do {
-            guard let image = try await item.loadTransferable(type: Image.self) else {
+            guard let image = try await item.loadTransferable(type: Image.self),
+                  let data = try await item.loadTransferable(type: Data.self)
+            else {
                 return
             }
             await MainActor.run {
                 coverPhotoPreview = image
-                viewModel.applyCoverPhotoSelection(hasPhoto: true)
+                viewModel.applyCoverPhotoSelection(imageData: data)
                 // Keep flow moving: after selecting a photo, immediately focus hike name.
                 isHikeNameFocused = true
             }
@@ -430,7 +439,11 @@ struct NewHikeView: View {
 
     private func applyCapturedCoverPhoto(_ uiImage: UIImage) {
         coverPhotoPreview = Image(uiImage: uiImage)
-        viewModel.applyCoverPhotoSelection(hasPhoto: true)
+        if let data = uiImage.jpegData(compressionQuality: 0.82) {
+            viewModel.applyCoverPhotoSelection(imageData: data)
+        } else {
+            viewModel.applyCoverPhotoSelection(hasPhoto: false)
+        }
         isHikeNameFocused = true
     }
 #endif

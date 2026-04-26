@@ -1,19 +1,33 @@
 import SwiftUI
 import PhotosUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct NewHikeView: View {
     @StateObject private var viewModel = NewHikeViewModel()
     @State private var didAnimateIn = false
     @State private var coverPhotoItem: PhotosPickerItem?
     @State private var coverPhotoPreview: Image?
+    @State private var showCoverPhotoSourceDialog = false
+    @State private var showPhotoLibraryPicker = false
+#if canImport(UIKit)
+    @State private var showCameraPicker = false
+    @State private var capturedCoverUIImage: UIImage?
+    @State private var showCameraUnavailableAlert = false
+#endif
+    @FocusState private var isHikeNameFocused: Bool
+    @State private var showStartErrorAlert = false
 
     let onClose: () -> Void
+    let onStartHike: (String) -> Void
 
     private let green = Color(red: 30 / 255, green: 86 / 255, blue: 49 / 255)
     private let pageBackground = Color(red: 245 / 255, green: 248 / 255, blue: 245 / 255)
 
-    init(onClose: @escaping () -> Void = {}) {
+    init(onClose: @escaping () -> Void = {}, onStartHike: @escaping (String) -> Void = { _ in }) {
         self.onClose = onClose
+        self.onStartHike = onStartHike
     }
 
     var body: some View {
@@ -45,11 +59,55 @@ struct NewHikeView: View {
             .opacity(didAnimateIn ? 1 : 0)
             .offset(y: didAnimateIn ? 0 : 16)
             .onAppear {
+                viewModel.beginLocationLookup()
                 withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
                     didAnimateIn = true
                 }
             }
         }
+        .confirmationDialog("Add Cover Photo", isPresented: $showCoverPhotoSourceDialog, titleVisibility: .visible) {
+#if canImport(UIKit)
+            Button("Take Photo") {
+                presentCameraCapture()
+            }
+#endif
+            Button("Photo Library") {
+                showPhotoLibraryPicker = true
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .photosPicker(isPresented: $showPhotoLibraryPicker, selection: $coverPhotoItem, matching: .images, photoLibrary: .shared())
+#if canImport(UIKit)
+        .sheet(isPresented: $showCameraPicker) {
+            CameraPhotoPicker(image: $capturedCoverUIImage)
+                .ignoresSafeArea()
+        }
+#endif
+        .onChange(of: coverPhotoItem) { _, newItem in
+            guard let newItem else { return }
+            Task { await loadCoverPhoto(from: newItem) }
+        }
+#if canImport(UIKit)
+        .onChange(of: capturedCoverUIImage) { _, newImage in
+            guard let newImage else { return }
+            applyCapturedCoverPhoto(newImage)
+            capturedCoverUIImage = nil
+        }
+        .alert("Camera Unavailable", isPresented: $showCameraUnavailableAlert) {
+            Button("Open Photo Library") {
+                showPhotoLibraryPicker = true
+            }
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("This device does not have an available camera. You can still choose a photo from your library.")
+        }
+#endif
+        .alert("Unable to start hike", isPresented: $showStartErrorAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(viewModel.errorMessage ?? "Please try again.")
+        }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
     private func header(topInset: CGFloat, horizontalPadding: CGFloat) -> some View {
@@ -173,6 +231,8 @@ struct NewHikeView: View {
                     .font(.system(size: 15))
                     .foregroundStyle(Color(red: 180 / 255, green: 180 / 255, blue: 180 / 255))
                 TextField("Name your hike... (e.g., Sunset Ridge)", text: $viewModel.hikeName)
+                    .foregroundStyle(.black)
+                    .focused($isHikeNameFocused)
             }
             .padding(.horizontal, 16)
             .frame(height: 54)
@@ -182,6 +242,9 @@ struct NewHikeView: View {
                     .stroke(Color(red: 232 / 255, green: 237 / 255, blue: 232 / 255), lineWidth: 1.5)
             )
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .onTapGesture {
+                isHikeNameFocused = true
+            }
         }
     }
 
@@ -205,8 +268,10 @@ struct NewHikeView: View {
 
     private var defaultCoverPhotoCard: some View {
         VStack(spacing: 8) {
-            PhotosPicker(selection: $coverPhotoItem, matching: .images, photoLibrary: .shared()) {
-                Group {
+            Button {
+                showCoverPhotoSourceDialog = true
+            } label: {
+                ZStack {
                     if let coverPhotoPreview {
                         coverPhotoPreview
                             .resizable()
@@ -248,21 +313,22 @@ struct NewHikeView: View {
                         .background(.white)
                     }
                 }
+                .frame(maxWidth: .infinity)
+                .frame(height: 196)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .stroke(green.opacity(0.3), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
                 )
+                .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             .buttonStyle(.plain)
-            .onChange(of: coverPhotoItem) { _, newItem in
-                guard let newItem else { return }
-                Task { await loadCoverPhoto(from: newItem) }
-            }
 
             HStack(spacing: 12) {
                 if coverPhotoPreview != nil {
-                    PhotosPicker(selection: $coverPhotoItem, matching: .images, photoLibrary: .shared()) {
+                    Button {
+                        showCoverPhotoSourceDialog = true
+                    } label: {
                         Text("Retake")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(green)
@@ -312,7 +378,9 @@ struct NewHikeView: View {
 
             Spacer()
 
-            PhotosPicker(selection: $coverPhotoItem, matching: .images, photoLibrary: .shared()) {
+            Button {
+                showCoverPhotoSourceDialog = true
+            } label: {
                 Text("Add")
                     .font(.custom("Montserrat-Bold", size: 14))
                     .foregroundStyle(green)
@@ -320,10 +388,6 @@ struct NewHikeView: View {
                     .frame(height: 30)
             }
             .buttonStyle(.plain)
-            .onChange(of: coverPhotoItem) { _, newItem in
-                guard let newItem else { return }
-                Task { await loadCoverPhoto(from: newItem) }
-            }
         }
         .padding(.horizontal, 16)
         .frame(height: 92)
@@ -344,6 +408,8 @@ struct NewHikeView: View {
             await MainActor.run {
                 coverPhotoPreview = image
                 viewModel.applyCoverPhotoSelection(hasPhoto: true)
+                // Keep flow moving: after selecting a photo, immediately focus hike name.
+                isHikeNameFocused = true
             }
         } catch {
             await MainActor.run {
@@ -353,6 +419,22 @@ struct NewHikeView: View {
         }
     }
 
+#if canImport(UIKit)
+    private func presentCameraCapture() {
+        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+            showCameraPicker = true
+        } else {
+            showCameraUnavailableAlert = true
+        }
+    }
+
+    private func applyCapturedCoverPhoto(_ uiImage: UIImage) {
+        coverPhotoPreview = Image(uiImage: uiImage)
+        viewModel.applyCoverPhotoSelection(hasPhoto: true)
+        isHikeNameFocused = true
+    }
+#endif
+
     private func bottomStartBar(bottomInset: CGFloat, horizontalPadding: CGFloat) -> some View {
         VStack(spacing: 12) {
             Text(viewModel.canStartHike ? "Ready to begin your hike" : "Give your hike a name to begin")
@@ -360,7 +442,14 @@ struct NewHikeView: View {
                 .foregroundStyle(Color(red: 112 / 255, green: 112 / 255, blue: 112 / 255))
 
             Button {
-                Task { await viewModel.startHike() }
+                Task {
+                    let started = await viewModel.startHike()
+                    if started {
+                        onStartHike(viewModel.hikeName.trimmingCharacters(in: .whitespacesAndNewlines))
+                    } else {
+                        showStartErrorAlert = true
+                    }
+                }
             } label: {
                 HStack(spacing: 10) {
                     if viewModel.isStarting {
@@ -397,6 +486,49 @@ struct NewHikeView: View {
         }
     }
 }
+
+#if canImport(UIKit)
+private struct CameraPhotoPicker: UIViewControllerRepresentable {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var image: UIImage?
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        picker.allowsEditing = false
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
+        private let parent: CameraPhotoPicker
+
+        init(_ parent: CameraPhotoPicker) {
+            self.parent = parent
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.dismiss()
+        }
+
+        func imagePickerController(
+            _ picker: UIImagePickerController,
+            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+        ) {
+            if let selectedImage = info[.originalImage] as? UIImage {
+                parent.image = selectedImage
+            }
+            parent.dismiss()
+        }
+    }
+}
+#endif
 
 #Preview {
     NewHikeView()

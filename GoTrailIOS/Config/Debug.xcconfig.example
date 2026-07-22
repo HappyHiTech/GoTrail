@@ -1,0 +1,6 @@
+// Debug configuration — copy this file to Debug.xcconfig and fill in your own credentials.
+// NEVER commit Debug.xcconfig to source control (it is .gitignored).
+SLASH = /
+SUPABASE_URL = https:$(SLASH)$(SLASH)YOUR_SUPABASE_PROJECT_ID.supabase.co
+SUPABASE_ANON_KEY = YOUR_SUPABASE_ANON_KEY
+ZETIC_MLANGE_PERSONAL_KEY = YOUR_ZETIC_MLANGE_PERSONAL_KEY
